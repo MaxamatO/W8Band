@@ -1,84 +1,97 @@
 #include "w8band.hpp"
 
-#include <memory>
-
-static uint16_t fifo_samples;
 namespace w8band
 {
 
-W8Band *instance = nullptr;
+static W8Band *instance = nullptr;
+static uint16_t fifo_samples = 0;
 
+// Q1.14 scale: multiply float [-1,1] by 16384 and clamp to int16
+static inline int16_t toQ14(float v)
+{
+    int32_t x = (int32_t)(v * 16384.0f);
+    if(x > 32767)
+        x = 32767;
+    if(x < -32768)
+        x = -32768;
+    return (int16_t)x;
+}
+
+// -------------------------------------------------------------------
 W8Band::W8Band(TwoWire &wireBus, uint8_t i2cAddress)
     : m_Imu(&wireBus, i2cAddress),
       m_BLEService("19B10000-E8F2-537E-4F6C-D104768A1214"),
-      m_IsLSMEnabledCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214",
-                                   BLERead | BLEWrite),
-      m_ConnectionHandle(BLE_CONN_HANDLE_INVALID),
+      m_ControlCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214",
+                              BLERead | BLEWrite),
       m_DataCharacteristic("19B10002-E8F2-537E-4F6C-D104768A1214")
-{
-    m_Data.clear();
-    instance = this;
-}
+{ instance = this; }
 
+// -------------------------------------------------------------------
 void W8Band::Init()
 {
+    Serial.begin(115200);
     InitLsm();
     InitBle();
 }
 
+// -------------------------------------------------------------------
 bool W8Band::InitLsm()
 {
     uint8_t status = 0;
+
     status |= m_Imu.begin();
-
     status |= m_Imu.Device_Reset();
-    delay(10);
-
-    status |= m_Imu.Enable_X();
-    status |= m_Imu.Enable_G();
-    status |= m_Imu.Set_X_FS(4);
-    status |= m_Imu.Set_G_FS(2000);
-
-    status |= m_Imu.Set_X_ODR(120.0f);
-    status |= m_Imu.Set_G_ODR(120.0f);
     delay(50);
 
-    status |= m_Imu.Set_SFLP_ODR(120.0f);
+    status |= m_Imu.Enable_X();
+    status |= m_Imu.Set_X_FS(4);
+    status |= m_Imu.Set_X_ODR(IMU_FREQ);
+
+    status |= m_Imu.Enable_G();
+    status |= m_Imu.Set_G_FS(2000);
+    status |= m_Imu.Set_G_ODR(IMU_FREQ);
+    delay(50);
+
+    status |= m_Imu.Set_SFLP_ODR(IMU_FREQ);
     status |= m_Imu.Enable_Rotation_Vector();
+    delay(20);
+
     status |= m_Imu.FIFO_Set_Mode(LSM6DSV16X_BYPASS_MODE);
-    delay(10);
-
+    delay(20);
     status |= m_Imu.Set_SFLP_Batch(true, false, false);
-
-    status |= m_Imu.FIFO_Set_X_BDR(120.0f);
+    status |= m_Imu.FIFO_Set_X_BDR(IMU_FREQ);
     status |= m_Imu.FIFO_Set_Mode(LSM6DSV16X_STREAM_MODE);
-    m_Tag = 0;
+    delay(20);
 
-    return status == LSM6DSV16X_OK;
+    Serial.print("IMU: ");
+    Serial.println(status == LSM6DSV16X_OK ? "OK" : "ERROR");
+    return (status == LSM6DSV16X_OK);
 }
 
+// -------------------------------------------------------------------
 void W8Band::InitBle()
 {
     Bluefruit.begin();
     Bluefruit.setTxPower(4);
     Bluefruit.setName("W8Band");
-
     Bluefruit.Periph.setConnectCallback(ConnectCallback);
     Bluefruit.Periph.setDisconnectCallback(DisconnectCallback);
 
     m_BLEService.begin();
 
-    m_IsLSMEnabledCharacteristic.setProperties(CHR_PROPS_READ
-                                               | CHR_PROPS_WRITE);
-    m_IsLSMEnabledCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
-    m_IsLSMEnabledCharacteristic.setFixedLen(1);
-    m_IsLSMEnabledCharacteristic.begin();
-    m_IsLSMEnabledCharacteristic.write8(0);
-    m_IsLSMEnabledCharacteristic.setWriteCallback(WriteCallback);
+    // Control – 1 byte R/W
+    m_ControlCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE);
+    m_ControlCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
+    m_ControlCharacteristic.setFixedLen(1);
+    m_ControlCharacteristic.begin();
+    m_ControlCharacteristic.write8(0);
+    m_ControlCharacteristic.setWriteCallback(WriteCallback);
 
+    // Data – NOTIFY, exactly 20 bytes per packet (one sample)
+    // Works with default MTU=23 (ATT overhead=3, payload=20)
     m_DataCharacteristic.setProperties(CHR_PROPS_NOTIFY);
     m_DataCharacteristic.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
-    m_DataCharacteristic.setMaxLen(244);
+    m_DataCharacteristic.setFixedLen(sizeof(SamplePacket)); // 20
     m_DataCharacteristic.begin();
 
     Bluefruit.Advertising.addFlags(
@@ -87,163 +100,179 @@ void W8Band::InitBle()
     Bluefruit.Advertising.addService(m_BLEService);
     Bluefruit.Advertising.addName();
     Bluefruit.Advertising.restartOnDisconnect(true);
-
     Bluefruit.Advertising.start(0);
+
+    Serial.println("BLE: OK");
 }
 
+// -------------------------------------------------------------------
+void W8Band::Update()
+{
+    if(!m_IsRecording)
+        return;
+
+    if(millis() - m_RecordingStart >= RECORDING_TIME_MS)
+    {
+        m_IsRecording = false;
+        Serial.print("Recording done, samples: ");
+        Serial.println(m_Data.size());
+        SendBLEData();
+        return;
+    }
+
+    if(m_Imu.FIFO_Get_Num_Samples(&fifo_samples) != LSM6DSV16X_OK)
+        return;
+    if(fifo_samples == 0)
+        return;
+
+    for(uint16_t i = 0; i < fifo_samples; i++)
+    {
+        if(m_Imu.FIFO_Get_Tag(&m_Tag) != LSM6DSV16X_OK)
+            break;
+
+        if(m_Tag == TAG_GAME_ROTATION_VECTOR)
+        {
+            // Library returns float[4]: i(X), j(Y), k(Z), r(W)
+            float tmp[4];
+            m_Imu.FIFO_Get_Rotation_Vector(tmp);
+            m_LatestQuat[0] = tmp[3]; // Qw = r
+            m_LatestQuat[1] = tmp[0]; // Qx = i
+            m_LatestQuat[2] = tmp[1]; // Qy = j
+            m_LatestQuat[3] = tmp[2]; // Qz = k
+            m_HaveFreshQuat = true;
+        } else if(m_Tag == TAG_ACCELEROMETER)
+        {
+            m_Imu.FIFO_Get_X_Axes(m_LatestAccel); // int32 [mg]
+            m_HaveFreshAccel = true;
+        } else
+        {
+            int32_t dummy[3];
+            m_Imu.FIFO_Get_G_Axes(dummy);
+            continue;
+        }
+
+        if(m_HaveFreshQuat && m_HaveFreshAccel)
+        {
+            SamplePacket s;
+            s.q[0] = toQ14(m_LatestQuat[0]);
+            s.q[1] = toQ14(m_LatestQuat[1]);
+            s.q[2] = toQ14(m_LatestQuat[2]);
+            s.q[3] = toQ14(m_LatestQuat[3]);
+            s.a[0] = (int16_t)m_LatestAccel[0];
+            s.a[1] = (int16_t)m_LatestAccel[1];
+            s.a[2] = (int16_t)m_LatestAccel[2];
+            s.seq = m_Seq++;
+            s.timestamp_ms = millis();
+            m_Data.push_back(s);
+            m_HaveFreshQuat = false;
+            m_HaveFreshAccel = false;
+        }
+    }
+}
+
+// -------------------------------------------------------------------
+// Send one sample per notify packet (20 B = default MTU payload)
+// At 120Hz × 8s = ~960 samples × 20B = 19.2 kB
+// At 15ms connection interval: 960 × 15ms = 14.4s transfer time
+// → receiver should wait at least 15s after recording ends
+// -------------------------------------------------------------------
 void W8Band::SendBLEData()
 {
     if(m_Data.empty())
         return;
 
-    const int SAMPLES_PER_PACKET = 8;
-    const int SAMPLE_SIZE = sizeof(SystemData);
-    uint8_t buffer[SAMPLES_PER_PACKET * SAMPLE_SIZE];
+    const int total = (int)m_Data.size();
+    int sent = 0;
 
-    int totalSamples = m_Data.size();
-    int samplesSent = 0;
-
-    while(samplesSent < totalSamples)
+    while(sent < total)
     {
-        int samplesInThisPacket
-            = min(SAMPLES_PER_PACKET, totalSamples - samplesSent);
-        int bytesToSend = samplesInThisPacket * SAMPLE_SIZE;
+        int wait = 200;
+        while(!Bluefruit.connected() && wait-- > 0)
+            delay(10);
+        if(!Bluefruit.connected())
+        {
+            Serial.println("BLE lost");
+            break;
+        }
 
-        memcpy(buffer, &m_Data[samplesSent], bytesToSend);
+        bool ok = m_DataCharacteristic.notify(
+            reinterpret_cast<const uint8_t *>(&m_Data[sent]),
+            sizeof(SamplePacket));
 
-        m_DataCharacteristic.notify(buffer, bytesToSend);
-        samplesSent += samplesInThisPacket;
-
-        delay(5);
+        if(ok)
+        {
+            sent++;
+            // Yield every 8 packets so the SoftDevice stack can breathe
+            if(sent % 8 == 0)
+                delay(1);
+        } else
+        {
+            delay(2); // stack busy, retry same packet
+        }
     }
-    Serial.println(samplesSent);
+    SamplePacket eof;
+    memset(&eof, 0, sizeof(eof));
+    eof.seq = 0xFFFF;
+    eof.timestamp_ms = (uint32_t)total;
+
+    for(int i = 0; i < 5; i++)
+    {
+        int wait = 100;
+        while(!Bluefruit.connected() && wait-- > 0)
+            delay(10);
+        if(!Bluefruit.connected())
+            break;
+        m_DataCharacteristic.notify(reinterpret_cast<const uint8_t *>(&eof),
+                                    sizeof(eof));
+        delay(20);
+    }
+
+    Serial.print("Sent: ");
+    Serial.print(sent);
+    Serial.print(" / ");
+    Serial.println(total);
+
+    m_ControlCharacteristic.write8(0);
 }
 
-void W8Band::ConnectCallback(uint16_t connHandle)
+// -------------------------------------------------------------------
+void W8Band::WriteCallback(uint16_t, BLECharacteristic *, uint8_t *data,
+                           uint16_t len)
 {
-    Serial.println("Telefon połączony!");
-    // Tutaj możesz np. zapalić diodę LED na płytce
-}
-
-void W8Band::DisconnectCallback(uint16_t connHandle, uint8_t reason)
-{
-    Serial.print("Rozłączono. Powód: ");
-    Serial.println(reason);
-}
-
-// void W8Band::Update()
-// {
-//     // if(millis() - m_RecordingStartTime >= RECORDING_TIME)
-//     // {
-//     //     m_IsRecording = false;
-//     //     Serial.println("Zakonczono nagrywanie.");
-//     //     SendBLEData();
-//     //     return;
-//     // }
-
-//     SystemData systemData;
-
-//     if(m_Imu.FIFO_Get_Num_Samples(&fifo_samples) != LSM6DSV16X_OK)
-//     {
-//         Serial.println("LSM6DSV16X Sensor failed to get number of samples "
-//                        "inside FIFO");
-//         return;
-//     }
-
-//     if(fifo_samples > 0)
-//     {
-//         for(int i = 0; i < fifo_samples; i++)
-//         {
-//             m_Imu.FIFO_Get_Tag(&m_Tag);
-//             if(m_Tag == TAG_GAME_ROTATION_VECTOR)
-//             {
-//                 m_Imu.FIFO_Get_Rotation_Vector(&systemData.m_Quaternions[0]);
-//             } else if(m_Tag == TAG_ACCELEROMETER)
-//             {
-//                 m_Imu.FIFO_Get_X_Axes(systemData.m_Accelerometer);
-//                 m_Data.push_back(systemData);
-//             }
-//         }
-//     }
-// }
-
-void W8Band::WriteCallback(uint16_t conn_hdl, BLECharacteristic *chr,
-                           uint8_t *data, uint16_t len)
-{
-    // if(data[0] == 1)
-    // {
+    if(len < 1 || data[0] != 1)
+        return;
     if(instance->m_IsRecording)
         return;
 
-    Serial.println("Ustawiam flage nagrywania na true");
-    instance->m_Imu.FIFO_Set_Mode(LSM6DSV16X_BYPASS_MODE);
-    delay(5);
-    instance->m_Imu.FIFO_Set_Mode(LSM6DSV16X_STREAM_MODE);
+    Serial.println("START");
+
     instance->m_Data.clear();
-    instance->m_Data.reserve(600);
-    // instance->m_RecordingStartTime = millis();
+    instance->m_Data.reserve(1200);
+    instance->m_HaveFreshQuat = false;
+    instance->m_HaveFreshAccel = false;
+    instance->m_Seq = 0;
+
+    instance->m_Imu.FIFO_Set_Mode(LSM6DSV16X_BYPASS_MODE);
+    delay(10);
+    instance->m_Imu.FIFO_Set_Mode(LSM6DSV16X_STREAM_MODE);
+    delay(10);
+
+    instance->m_RecordingStart = millis();
     instance->m_IsRecording = true;
-    // } else
-    // {
-    //     // Serial.println("Ustawiam flage nagrywania na false");
-    //     // instance->m_IsRecording = false;
-    // }
 }
 
-void W8Band::Update()
+void W8Band::ConnectCallback(uint16_t conn_hdl)
 {
-    if(m_Imu.FIFO_Get_Num_Samples(&fifo_samples) != LSM6DSV16X_OK)
-    {
-        // Zakomentowane, żeby nie śmieciło na porcie szeregowym, gdy Python
-        // nasłuchuje liczb Serial.println("LSM6DSV16X Sensor failed to get
-        // number of samples inside FIFO");
-        return;
-    }
-
-    if(fifo_samples > 0)
-    {
-        for(int i = 0; i < fifo_samples; i++)
-        {
-            m_Imu.FIFO_Get_Tag(&m_Tag);
-
-            if(m_Tag == TAG_GAME_ROTATION_VECTOR)
-            {
-                // Aktualizujemy kwaternion w naszej "trwałej" ramce
-                m_Imu.FIFO_Get_Rotation_Vector(
-                    &m_CurrentFrame.m_Quaternions[0]);
-            } else if(m_Tag == TAG_ACCELEROMETER)
-            {
-                // Aktualizujemy akcelerometr
-                m_Imu.FIFO_Get_X_Axes(m_CurrentFrame.m_Accelerometer);
-
-                // --- STREAMING NA ŻYWO (Format CSV: Qx,Qy,Qz,Qw,Ax,Ay,Az) ---
-                Serial.print(m_CurrentFrame.m_Quaternions[0], 4);
-                Serial.print(",");
-                Serial.print(m_CurrentFrame.m_Quaternions[1], 4);
-                Serial.print(",");
-                Serial.print(m_CurrentFrame.m_Quaternions[2], 4);
-                Serial.print(",");
-                Serial.print(m_CurrentFrame.m_Quaternions[3], 4);
-                Serial.print(",");
-                Serial.print(m_CurrentFrame.m_Accelerometer[0]);
-                Serial.print(",");
-                Serial.print(m_CurrentFrame.m_Accelerometer[1]);
-                Serial.print(",");
-                Serial.println(
-                    m_CurrentFrame.m_Accelerometer[2]); // println na końcu!
-            } else
-            {
-                // Bardzo ważne: opróżniamy FIFO z innych tagów (np. żyroskopu,
-                // temperatury), żeby nie zapchać pamięci układu scalonego.
-                int32_t dummy[3];
-                m_Imu.FIFO_Get_G_Axes(dummy);
-            }
-        }
-    }
+    Serial.println("BLE connected");
+    // Request larger MTU – central may or may not honour it.
+    // If it does, Bleak will see mtu_size > 23 and we could batch packets.
+    // If not, 20-byte single-sample packets still work fine.
+    BLEConnection *conn = Bluefruit.Connection(conn_hdl);
+    if(conn)
+        conn->requestMtuExchange(247);
 }
 
-void W8Band::AccelerometerHandle() {}
-
-void W8Band::QuaternionHandle() {}
+void W8Band::DisconnectCallback(uint16_t, uint8_t)
+{ Serial.println("BLE disconnected"); }
 
 } // namespace w8band
