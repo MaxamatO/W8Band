@@ -31,7 +31,7 @@ void W8Band::Init()
 {
     Serial.begin(115200);
     InitLsm();
-    InitBle();
+    // InitBle();
 }
 
 // -------------------------------------------------------------------
@@ -69,57 +69,45 @@ bool W8Band::InitLsm()
 }
 
 // -------------------------------------------------------------------
-void W8Band::InitBle()
-{
-    Bluefruit.begin();
-    Bluefruit.setTxPower(4);
-    Bluefruit.setName("W8Band");
-    Bluefruit.Periph.setConnectCallback(ConnectCallback);
-    Bluefruit.Periph.setDisconnectCallback(DisconnectCallback);
+// void W8Band::InitBle()
+// {
+//     Bluefruit.begin();
+//     Bluefruit.setTxPower(4);
+//     Bluefruit.setName("W8Band");
+//     Bluefruit.Periph.setConnectCallback(ConnectCallback);
+//     Bluefruit.Periph.setDisconnectCallback(DisconnectCallback);
 
-    m_BLEService.begin();
+//     m_BLEService.begin();
 
-    // Control – 1 byte R/W
-    m_ControlCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE);
-    m_ControlCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
-    m_ControlCharacteristic.setFixedLen(1);
-    m_ControlCharacteristic.begin();
-    m_ControlCharacteristic.write8(0);
-    m_ControlCharacteristic.setWriteCallback(WriteCallback);
+//     // Control – 1 byte R/W
+//     m_ControlCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE);
+//     m_ControlCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
+//     m_ControlCharacteristic.setFixedLen(1);
+//     m_ControlCharacteristic.begin();
+//     m_ControlCharacteristic.write8(0);
+//     m_ControlCharacteristic.setWriteCallback(WriteCallback);
 
-    // Data – NOTIFY, exactly 20 bytes per packet (one sample)
-    // Works with default MTU=23 (ATT overhead=3, payload=20)
-    m_DataCharacteristic.setProperties(CHR_PROPS_NOTIFY);
-    m_DataCharacteristic.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
-    m_DataCharacteristic.setFixedLen(sizeof(SamplePacket)); // 20
-    m_DataCharacteristic.begin();
+//     // Data – NOTIFY, exactly 20 bytes per packet (one sample)
+//     // Works with default MTU=23 (ATT overhead=3, payload=20)
+//     m_DataCharacteristic.setProperties(CHR_PROPS_NOTIFY);
+//     m_DataCharacteristic.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+//     m_DataCharacteristic.setFixedLen(sizeof(SamplePacket)); // 20
+//     m_DataCharacteristic.begin();
 
-    Bluefruit.Advertising.addFlags(
-        BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
-    Bluefruit.Advertising.addTxPower();
-    Bluefruit.Advertising.addService(m_BLEService);
-    Bluefruit.Advertising.addName();
-    Bluefruit.Advertising.restartOnDisconnect(true);
-    Bluefruit.Advertising.start(0);
+//     Bluefruit.Advertising.addFlags(
+//         BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+//     Bluefruit.Advertising.addTxPower();
+//     Bluefruit.Advertising.addService(m_BLEService);
+//     Bluefruit.Advertising.addName();
+//     Bluefruit.Advertising.restartOnDisconnect(true);
+//     Bluefruit.Advertising.start(0);
 
-    Serial.println("BLE: OK");
-}
+//     Serial.println("BLE: OK");
+// }
 
 // -------------------------------------------------------------------
 void W8Band::Update()
 {
-    if(!m_IsRecording)
-        return;
-
-    if(millis() - m_RecordingStart >= RECORDING_TIME_MS)
-    {
-        m_IsRecording = false;
-        Serial.print("Recording done, samples: ");
-        Serial.println(m_Data.size());
-        SendBLEData();
-        return;
-    }
-
     if(m_Imu.FIFO_Get_Num_Samples(&fifo_samples) != LSM6DSV16X_OK)
         return;
     if(fifo_samples == 0)
@@ -166,6 +154,22 @@ void W8Band::Update()
             m_Data.push_back(s);
             m_HaveFreshQuat = false;
             m_HaveFreshAccel = false;
+            Serial.println("Quats: ");
+            Serial.print("r: ");
+            Serial.println(s.q[0]);
+            Serial.print("i: ");
+            Serial.println(s.q[1]);
+            Serial.print("j: ");
+            Serial.println(s.q[2]);
+            Serial.print("k: ");
+            Serial.println(s.q[3]);
+            Serial.println("Accel: ");
+            Serial.print("x: ");
+            Serial.println(s.a[0]);
+            Serial.print("y: ");
+            Serial.println(s.a[1]);
+            Serial.print("z: ");
+            Serial.println(s.a[2]);
         }
     }
 }
@@ -176,103 +180,103 @@ void W8Band::Update()
 // At 15ms connection interval: 960 × 15ms = 14.4s transfer time
 // → receiver should wait at least 15s after recording ends
 // -------------------------------------------------------------------
-void W8Band::SendBLEData()
-{
-    if(m_Data.empty())
-        return;
+// void W8Band::SendBLEData()
+// {
+//     if(m_Data.empty())
+//         return;
 
-    const int total = (int)m_Data.size();
-    int sent = 0;
+//     const int total = (int)m_Data.size();
+//     int sent = 0;
 
-    while(sent < total)
-    {
-        int wait = 200;
-        while(!Bluefruit.connected() && wait-- > 0)
-            delay(10);
-        if(!Bluefruit.connected())
-        {
-            Serial.println("BLE lost");
-            break;
-        }
+//     while(sent < total)
+//     {
+//         int wait = 200;
+//         while(!Bluefruit.connected() && wait-- > 0)
+//             delay(10);
+//         if(!Bluefruit.connected())
+//         {
+//             Serial.println("BLE lost");
+//             break;
+//         }
 
-        bool ok = m_DataCharacteristic.notify(
-            reinterpret_cast<const uint8_t *>(&m_Data[sent]),
-            sizeof(SamplePacket));
+//         bool ok = m_DataCharacteristic.notify(
+//             reinterpret_cast<const uint8_t *>(&m_Data[sent]),
+//             sizeof(SamplePacket));
 
-        if(ok)
-        {
-            sent++;
-            // Yield every 8 packets so the SoftDevice stack can breathe
-            if(sent % 8 == 0)
-                delay(1);
-        } else
-        {
-            delay(2); // stack busy, retry same packet
-        }
-    }
-    SamplePacket eof;
-    memset(&eof, 0, sizeof(eof));
-    eof.seq = 0xFFFF;
-    eof.timestamp_ms = (uint32_t)total;
+//         if(ok)
+//         {
+//             sent++;
+//             // Yield every 8 packets so the SoftDevice stack can breathe
+//             if(sent % 8 == 0)
+//                 delay(1);
+//         } else
+//         {
+//             delay(2); // stack busy, retry same packet
+//         }
+//     }
+//     SamplePacket eof;
+//     memset(&eof, 0, sizeof(eof));
+//     eof.seq = 0xFFFF;
+//     eof.timestamp_ms = (uint32_t)total;
 
-    for(int i = 0; i < 5; i++)
-    {
-        int wait = 100;
-        while(!Bluefruit.connected() && wait-- > 0)
-            delay(10);
-        if(!Bluefruit.connected())
-            break;
-        m_DataCharacteristic.notify(reinterpret_cast<const uint8_t *>(&eof),
-                                    sizeof(eof));
-        delay(20);
-    }
+//     for(int i = 0; i < 5; i++)
+//     {
+//         int wait = 100;
+//         while(!Bluefruit.connected() && wait-- > 0)
+//             delay(10);
+//         if(!Bluefruit.connected())
+//             break;
+//         m_DataCharacteristic.notify(reinterpret_cast<const uint8_t *>(&eof),
+//                                     sizeof(eof));
+//         delay(20);
+//     }
 
-    Serial.print("Sent: ");
-    Serial.print(sent);
-    Serial.print(" / ");
-    Serial.println(total);
+//     Serial.print("Sent: ");
+//     Serial.print(sent);
+//     Serial.print(" / ");
+//     Serial.println(total);
 
-    m_ControlCharacteristic.write8(0);
-}
+//     m_ControlCharacteristic.write8(0);
+// }
 
-// -------------------------------------------------------------------
-void W8Band::WriteCallback(uint16_t, BLECharacteristic *, uint8_t *data,
-                           uint16_t len)
-{
-    if(len < 1 || data[0] != 1)
-        return;
-    if(instance->m_IsRecording)
-        return;
+// // -------------------------------------------------------------------
+// void W8Band::WriteCallback(uint16_t, BLECharacteristic *, uint8_t *data,
+//                            uint16_t len)
+// {
+//     if(len < 1 || data[0] != 1)
+//         return;
+//     if(instance->m_IsRecording)
+//         return;
 
-    Serial.println("START");
+//     Serial.println("START");
 
-    instance->m_Data.clear();
-    instance->m_Data.reserve(1200);
-    instance->m_HaveFreshQuat = false;
-    instance->m_HaveFreshAccel = false;
-    instance->m_Seq = 0;
+//     instance->m_Data.clear();
+//     instance->m_Data.reserve(1200);
+//     instance->m_HaveFreshQuat = false;
+//     instance->m_HaveFreshAccel = false;
+//     instance->m_Seq = 0;
 
-    instance->m_Imu.FIFO_Set_Mode(LSM6DSV16X_BYPASS_MODE);
-    delay(10);
-    instance->m_Imu.FIFO_Set_Mode(LSM6DSV16X_STREAM_MODE);
-    delay(10);
+//     instance->m_Imu.FIFO_Set_Mode(LSM6DSV16X_BYPASS_MODE);
+//     delay(10);
+//     instance->m_Imu.FIFO_Set_Mode(LSM6DSV16X_STREAM_MODE);
+//     delay(10);
 
-    instance->m_RecordingStart = millis();
-    instance->m_IsRecording = true;
-}
+//     instance->m_RecordingStart = millis();
+//     instance->m_IsRecording = true;
+// }
 
-void W8Band::ConnectCallback(uint16_t conn_hdl)
-{
-    Serial.println("BLE connected");
-    // Request larger MTU – central may or may not honour it.
-    // If it does, Bleak will see mtu_size > 23 and we could batch packets.
-    // If not, 20-byte single-sample packets still work fine.
-    BLEConnection *conn = Bluefruit.Connection(conn_hdl);
-    if(conn)
-        conn->requestMtuExchange(247);
-}
+// void W8Band::ConnectCallback(uint16_t conn_hdl)
+// {
+//     Serial.println("BLE connected");
+//     // Request larger MTU – central may or may not honour it.
+//     // If it does, Bleak will see mtu_size > 23 and we could batch packets.
+//     // If not, 20-byte single-sample packets still work fine.
+//     BLEConnection *conn = Bluefruit.Connection(conn_hdl);
+//     if(conn)
+//         conn->requestMtuExchange(247);
+// }
 
-void W8Band::DisconnectCallback(uint16_t, uint8_t)
-{ Serial.println("BLE disconnected"); }
+// void W8Band::DisconnectCallback(uint16_t, uint8_t)
+// { Serial.println("BLE disconnected"); }
 
 } // namespace w8band

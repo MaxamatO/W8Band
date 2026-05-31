@@ -16,4 +16,8 @@ void setup()
     Band.Init();
 }
 
-void loop() { Band.Update(); }
+void loop()
+{
+    Band.Update();
+    delay(100);
+}
