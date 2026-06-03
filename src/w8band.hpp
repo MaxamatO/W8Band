@@ -10,28 +10,20 @@
 #define TAG_ACCELEROMETER 0x02u
 
 #define IMU_FREQ 120.0f
+#define RECORDING_TIME_MS 8000
 
-// ── Piny przerwań
-// INT1 → Significant Motion (START nagrywania)
-// INT2 → Sleep/Inactivity    (STOP
-#define PIN_INT1 PIN_A2
-#define PIN_INT2 PIN_A3
-
-// ── Inactivity ───────────────────────────────────────────────────────────────
-// Próg wake-up / inactivity [LSB], 1 LSB = 31.25 mg (przy ±4 g, HP mode)
-// 3 LSB ≈ 94 mg — sztanga musi być naprawdę nieruchoma
-#define INACT_THRESHOLD_LSB 3
-
-// Czas bezruchu zanim uzna koniec serii: SLEEP_DUR × (512 / ODR_XL)
-// SLEEP_DUR=4 → 4 × 512/120 ≈ 17 s  (zwiększ jeśli kończy za wcześnie)
-#define SLEEP_DUR_VAL 1
-
-// ── Protokół BLE ─────────────────────────────────────────────────────────────
-// Wire format – 20 bytes little-endian:
-//   int16  Qw Qx Qy Qz  [8 B]  Q1.14
-//   int16  Ax Ay Az      [6 B]  mg
-//   uint16 seq           [2 B]
-//   uint32 timestamp_ms  [4 B]
+// -------------------------------------------------------------------
+// Wire format – 20 bytes, little-endian, no MTU negotiation needed:
+//
+//   int16  Qw Qx Qy Qz   [8 B]   Q1.14 fixed-point  (×16384 → int16)
+//   int16  Ax Ay Az       [6 B]   milligravity [mg]
+//   uint16 seq            [2 B]   sequence counter (detect lost packets)
+//   uint32 timestamp_ms   [4 B]   millis() on nRF
+//
+// Total: 20 bytes  →  Python struct '<4h3hHI'
+// 20 samples per BLE notify (20×20 = 400 B, but stack sends up to
+// floor(notify_max/20) samples; we cap at 1 to be safe with MTU=23)
+// -------------------------------------------------------------------
 namespace w8band
 {
 
@@ -44,15 +36,6 @@ struct __attribute__((packed)) SamplePacket
 };
 static_assert(sizeof(SamplePacket) == 20, "SamplePacket must be 20 bytes");
 
-// Stan maszyny stanów urządzenia
-enum class State : uint8_t
-{
-    IDLE,         // czeka na komendę BLE 0x01
-    CALIBRATING,  // IMU calibruje się, czeka na SMD
-    RECORDING,    // zbiera próbki
-    TRANSFERRING, // wysyła dane przez BLE
-};
-
 class W8Band
 {
 public:
@@ -60,17 +43,9 @@ public:
     void Init();
     void Update();
 
-    // Wywoływane z ISR — volatile flag, obsługa w Update()
-    static void IsrInt1(); // SMD  → START nagrywania
-    static void IsrInt2(); // SLEEP → STOP nagrywania
-
 private:
     bool InitLsm();
     void InitBle();
-    void ConfigureWakeInact();
-    void StartCalibration();
-    void StartRecording();
-    void StopRecording();
     void SendBLEData();
 
     static void ConnectCallback(uint16_t connHandle);
@@ -83,20 +58,17 @@ private:
     BLECharacteristic m_ControlCharacteristic;
     BLECharacteristic m_DataCharacteristic;
 
-    State m_State = State::IDLE;
-    uint16_t m_Seq = 0;
+    bool m_IsRecording = false;
+    unsigned long m_RecordingStart = 0;
     uint8_t m_Tag = 0;
+    uint16_t m_Seq = 0;
 
     std::vector<SamplePacket> m_Data;
 
-    float m_LatestQuat[4] = {};
-    int32_t m_LatestAccel[3] = {};
+    float m_LatestQuat[4] = {};    // Qw Qx Qy Qz  (float, converted on store)
+    int32_t m_LatestAccel[3] = {}; // mg
     bool m_HaveFreshQuat = false;
     bool m_HaveFreshAccel = false;
-
-    // Flagi ustawiane przez ISR, czyszczone w Update()
-    static volatile bool s_SmdFired;
-    static volatile bool s_InactFired;
 };
 
 } // namespace w8band
