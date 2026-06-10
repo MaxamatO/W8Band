@@ -3,12 +3,14 @@ Simple W8Band UI
 
 START launches w8band_mac.py, sends "1" to trigger 0x01 over BLE,
 then waits until the firmware detects motion, records, transfers EOF,
-and w8band_mac.py writes w8band_data2.csv. Only then ekf.py runs
-to generate w8band_trajectory_ekf.png.
+and w8band_mac.py writes w8band_data2.csv. Only then ekf.py analyzes
+the CSV and the trajectory is drawn directly in the UI.
 """
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import queue
 import subprocess
@@ -16,6 +18,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+from typing import Any
 from pathlib import Path
 from tkinter import ttk
 
@@ -24,6 +27,16 @@ BLE_SCRIPT = BASE_DIR / "w8band_mac.py"
 EKF_SCRIPT = BASE_DIR / "ekf.py"
 CSV_FILE = BASE_DIR / "w8band_data2.csv"
 TRAJECTORY_IMAGE = BASE_DIR / "w8band_trajectory_ekf.png"
+VENV_PYTHON = BASE_DIR.parent / "venv" / "bin" / "python"
+PYTHON = str(VENV_PYTHON if VENV_PYTHON.exists() else Path(sys.executable))
+
+if VENV_PYTHON.exists() and Path(sys.executable).resolve() != VENV_PYTHON.resolve():
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), *sys.argv])
+
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/w8band_matplotlib")
+
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 POLL_MS = 100
 QUIET_SECONDS = 1.0
@@ -36,10 +49,11 @@ class W8BandSimpleUI(tk.Tk):
         self.geometry("760x520")
         self.minsize(640, 420)
 
-        self._messages: queue.Queue[tuple[str, str]] = queue.Queue()
+        self._messages: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._worker: threading.Thread | None = None
         self._running = False
-        self._trajectory_photo: tk.PhotoImage | None = None
+        self._plot_canvas: FigureCanvasTkAgg | None = None
+        self._plot_figure: Figure | None = None
 
         self._build_ui()
         self.after(POLL_MS, self._drain_messages)
@@ -68,18 +82,18 @@ class W8BandSimpleUI(tk.Tk):
         log_frame = ttk.Frame(self, padding=(18, 0, 18, 18))
         log_frame.grid(row=3, column=0, sticky="nsew")
         log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=3)
         log_frame.rowconfigure(1, weight=1)
 
         preview_frame = ttk.LabelFrame(log_frame, text="Przeanalizowana trajektoria")
-        preview_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        preview_frame.grid(row=0, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
         preview_frame.columnconfigure(0, weight=1)
+        preview_frame.rowconfigure(0, weight=1)
 
-        self.image_label = ttk.Label(
-            preview_frame,
-            text="Trajektoria pojawi sie tutaj po zakonczeniu EKF.",
-            anchor="center",
-        )
-        self.image_label.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        self._plot_figure = Figure(figsize=(8, 4.8), dpi=100, facecolor="#0A0C10")
+        self._plot_canvas = FigureCanvasTkAgg(self._plot_figure, master=preview_frame)
+        self._plot_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        self._draw_empty_plot()
 
         self.log = tk.Text(log_frame, wrap="word", height=12, state="disabled")
         self.log.grid(row=1, column=0, sticky="nsew")
@@ -123,11 +137,10 @@ class W8BandSimpleUI(tk.Tk):
             self._post("status", "Transfer zakonczony. Czekam az CSV bedzie kompletny...")
             self._wait_for_csv(start_mtime)
 
-            self._post("status", "Running EKF trajectory calculation...")
-            self._run_ekf()
+            self._post("status", "Licze trajektorie...")
+            result = self._run_analysis()
 
-            if TRAJECTORY_IMAGE.exists():
-                self._post("image", str(TRAJECTORY_IMAGE))
+            self._post("analysis", result)
             self._post("status", "Gotowe. CSV kompletny, EKF policzyl trajektorie.")
             self._post("log", f"\nFinished.\nCSV: {CSV_FILE}\nTrajectory image: {TRAJECTORY_IMAGE}\n")
         except Exception as exc:
@@ -138,7 +151,7 @@ class W8BandSimpleUI(tk.Tk):
 
     def _run_ble_capture(self) -> None:
         process = subprocess.Popen(
-            [sys.executable, str(BLE_SCRIPT)],
+            [PYTHON, str(BLE_SCRIPT)],
             cwd=str(BASE_DIR),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -183,35 +196,23 @@ class W8BandSimpleUI(tk.Tk):
 
         raise TimeoutError(f"CSV did not finish populating: {CSV_FILE}")
 
-    def _run_ekf(self) -> None:
-        env = os.environ.copy()
-        env.setdefault("MPLBACKEND", "Agg")
+    def _run_analysis(self) -> Any:
+        import ekf
 
-        process = subprocess.Popen(
-            [sys.executable, str(EKF_SCRIPT)],
-            cwd=str(BASE_DIR),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env=env,
-        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = ekf.analyze(CSV_FILE)
+            ekf.plot_analysis(result, TRAJECTORY_IMAGE)
+            ekf.print_metrics(result)
 
-        if process.stdout is None:
-            raise RuntimeError("Could not open EKF process output.")
-
-        for line in process.stdout:
-            self._post("log", line)
-
-        rc = process.wait()
-        if rc != 0:
-            raise RuntimeError(f"EKF failed with exit code {rc}.")
+        self._post("log", output.getvalue())
+        return result
 
     def _require_file(self, path: Path) -> None:
         if not path.exists():
             raise FileNotFoundError(path)
 
-    def _post(self, kind: str, message: str) -> None:
+    def _post(self, kind: str, message: Any) -> None:
         self._messages.put((kind, message))
 
     def _drain_messages(self) -> None:
@@ -225,8 +226,8 @@ class W8BandSimpleUI(tk.Tk):
                 self._set_status(message)
             elif kind == "log":
                 self._append_log(message)
-            elif kind == "image":
-                self._show_trajectory_image(Path(message))
+            elif kind == "analysis":
+                self._draw_analysis_result(message)
             elif kind == "done":
                 self._running = False
                 self.progress.stop()
@@ -247,27 +248,113 @@ class W8BandSimpleUI(tk.Tk):
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
-        self._trajectory_photo = None
-        self.image_label.configure(
-            image="",
-            text="Trajektoria pojawi sie tutaj po zakonczeniu EKF.",
-        )
+        self._draw_empty_plot()
 
-    def _show_trajectory_image(self, image_path: Path) -> None:
-        try:
-            photo = tk.PhotoImage(file=str(image_path))
-        except tk.TclError as exc:
-            self._append_log(f"\nNie moge wyswietlic trajektorii w UI: {exc}\n")
+    def _draw_empty_plot(self) -> None:
+        if self._plot_figure is None or self._plot_canvas is None:
             return
 
-        max_width = max(1, self.image_label.winfo_width() - 24)
-        max_height = 260
-        factor = max(1, int(max(photo.width() / max_width, photo.height() / max_height)))
-        if factor > 1:
-            photo = photo.subsample(factor, factor)
+        fig = self._plot_figure
+        fig.clear()
+        ax = fig.add_subplot(111)
+        ax.set_facecolor("#0A0C10")
+        fig.patch.set_facecolor("#0A0C10")
+        ax.text(
+            0.5,
+            0.5,
+            "Trajektoria pojawi sie tutaj po analizie",
+            ha="center",
+            va="center",
+            color="#8892a0",
+            transform=ax.transAxes,
+        )
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_color("#1e2430")
+        self._plot_canvas.draw_idle()
 
-        self._trajectory_photo = photo
-        self.image_label.configure(image=photo, text="")
+    def _draw_analysis_result(self, result: Any) -> None:
+        if self._plot_figure is None or self._plot_canvas is None:
+            return
+
+        import numpy as np
+        import ekf
+
+        fig = self._plot_figure
+        fig.clear()
+        fig.patch.set_facecolor(ekf.BG)
+
+        pos_cm = result.position * 100.0
+        vel_cm_s = result.velocity * 100.0
+        speed = np.linalg.norm(vel_cm_s, axis=1)
+        vert = result.vertical_axis
+        horiz = ekf.HORIZ if ekf.HORIZ != vert else (1 if vert != 1 else 0)
+        labels = ["X", "Y", "Z"]
+
+        ax_traj = fig.add_subplot(121)
+        ax_speed = fig.add_subplot(122)
+
+        for ax in (ax_traj, ax_speed):
+            ax.set_facecolor(ekf.BG)
+            ax.tick_params(colors="#8892a0", labelsize=8)
+            for spine in ax.spines.values():
+                spine.set_color("#1e2430")
+            ax.grid(True, linewidth=0.35, color="#1e2430", alpha=0.8)
+
+        ax_traj.set_title("Trajektoria", color="#e2e8f0", fontsize=11)
+        ax_traj.set_xlabel(f"Poziomo {labels[horiz]} (cm)", color="#8892a0", fontsize=9)
+        ax_traj.set_ylabel(f"Pionowo {labels[vert]} (cm)", color="#8892a0", fontsize=9)
+
+        for k in range(1, len(pos_cm)):
+            color = ekf.PHASE_COLORS[int(result.phase[k])]
+            ax_traj.plot(
+                [pos_cm[k - 1, horiz], pos_cm[k, horiz]],
+                [pos_cm[k - 1, vert], pos_cm[k, vert]],
+                color=color,
+                lw=2.0,
+                solid_capstyle="round",
+            )
+
+        ax_traj.scatter(
+            pos_cm[0, horiz],
+            pos_cm[0, vert],
+            color=ekf.COL_START,
+            s=70,
+            zorder=10,
+            edgecolors="white",
+            linewidths=0.7,
+        )
+        ax_traj.scatter(
+            pos_cm[-1, horiz],
+            pos_cm[-1, vert],
+            color=ekf.COL_END,
+            s=70,
+            zorder=10,
+            edgecolors="white",
+            linewidths=0.7,
+        )
+        for idx in result.references[1:-1]:
+            ax_traj.scatter(
+                pos_cm[idx, horiz],
+                pos_cm[idx, vert],
+                color=ekf.COL_TURN,
+                s=45,
+                zorder=9,
+                edgecolors=ekf.BG,
+                linewidths=0.8,
+            )
+        ax_traj.set_aspect("equal", adjustable="datalim")
+
+        ax_speed.set_title("Predkosc", color="#e2e8f0", fontsize=11)
+        ax_speed.set_xlabel("Czas (s)", color="#8892a0", fontsize=9)
+        ax_speed.set_ylabel("cm/s", color="#8892a0", fontsize=9)
+        ax_speed.plot(result.time_s, speed, color="#e2e8f0", lw=1.2)
+        for idx in result.references:
+            ax_speed.axvline(result.time_s[idx], color=ekf.COL_TURN, lw=0.9, alpha=0.65)
+
+        fig.tight_layout(pad=1.2)
+        self._plot_canvas.draw_idle()
 
 
 if __name__ == "__main__":
