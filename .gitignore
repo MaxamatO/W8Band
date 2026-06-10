@@ -8,3 +8,6 @@ compile_commands.json
 *.txt
 *.csv
 *.png
+__pycache__
+.vscode
+.DS_STORE
