@@ -29,7 +29,7 @@ from scipy.signal import butter, sosfilt
 # ══════════════════════════════════════════════════════════════════════════════
 #  KONFIGURACJA
 # ══════════════════════════════════════════════════════════════════════════════
-CSV_FILE     = "w8band_data.csv"
+CSV_FILE     = "w8band_data2.csv"
 IMU_HZ       = 120.0
 DT           = 1.0 / IMU_HZ
 
@@ -163,13 +163,34 @@ Fs_buf = np.zeros((N, 9, 9))   # F jest stałe, ale zapisujemy dla RTS
 
 # ── State machine ─────────────────────────────────────────────────────────────
 # Stany: 0=REST, 1=ECCENTRIC, 2=TURNAROUND, 3=CONCENTRIC
+#
+# Logika fizyczna bench press:
+#   REST (na zaczepach, góra)
+#     → ECCENTRIC  gdy jerk > próg i v_z < 0 (opad)
+#     → TURNAROUND gdy czujnik jest wyraźnie poniżej pozycji startowej
+#                  i v_z ≈ 0 lub zmienia znak (dół ruchu, klatka)
+#     → CONCENTRIC gdy v_z > 0 po turnaround (push)
+#     → REST       gdy jerk mały, v_z ≈ 0, jesteśmy z powrotem wysoko
+#
+# Kluczowa różnica od poprzedniej wersji:
+#   TURNAROUND wykrywany przez POZYCJĘ względem startu (p_z < p_start - próg)
+#   a NIE przez v_z > 0 — bo ZUPT właśnie wyzerował v_z w dolnym punkcie,
+#   więc sprawdzanie v_z > 0 nigdy nie zachodziło.
 REST, ECCENTRIC, TURNAROUND, CONCENTRIC = 0, 1, 2, 3
 STATE_NAMES = ["REST", "ECCENTRIC", "TURNAROUND", "CONCENTRIC"]
 
 phase      = np.zeros(N, dtype=int)
 state      = REST
-conf_cnt   = 0    # licznik potwierdzenia wejścia w REST
+conf_cnt   = 0    # licznik potwierdzenia wejścia w REST / TURNAROUND
 exit_cnt   = 0    # licznik wyjścia z REST (hystereza)
+
+# Pozycja startowa (góra) — zapisana gdy wychodzimy z pierwszego REST
+p_z_top    = 0.0   # zostanie ustawiona przy wyjściu z pierwszego REST
+p_z_top_set = False
+
+# Minimalny opad żeby wejść w TURNAROUND [m]
+# Bench press: co najmniej 15 cm poniżej pozycji startowej
+TURNAROUND_DROP_M = 0.10   # 10 cm — bezpieczny próg dla wolnego ruchu
 
 # Norma przyspieszenia + jerk do detekcji faz
 a_norm_all = np.linalg.norm(a_comp, axis=1)
@@ -179,6 +200,10 @@ a_norm_smooth = sosfilt(sos_lp, a_norm_all)
 
 jerk_raw = np.abs(np.gradient(a_norm_smooth, DT))
 jerk_raw = sosfilt(sos_lp, jerk_raw)
+
+# Okno historii v_z do detekcji zmiany znaku (bez polegania na chwilowej wartości)
+VZ_HIST = 6   # próbek = 50ms
+vz_history = np.zeros(VZ_HIST)
 
 # EKF forward pass
 zupt_mask = np.zeros(N, dtype=bool)
@@ -190,58 +215,70 @@ for k in range(N):
     P = F @ P @ F.T + Q
 
     # ── Pomiar akcelerometru (update biasu) ───────────────────────────────────
-    # innowacja: obserwujemy a_comp[k] ≈ -bias (ruch już w v, bias powoli dryfuje)
-    # Uwaga: używamy słabego update — głównie do estymacji biasu, nie pozycji
-    z_a = a_comp[k]                         # obserwacja
-    y   = z_a - H_accel @ x                 # innowacja
+    z_a = a_comp[k]
+    y   = z_a - H_accel @ x
     S   = H_accel @ P @ H_accel.T + R_a
     K   = P @ H_accel.T @ np.linalg.inv(S)
     x   = x + K @ y
     P   = (np.eye(9) - K @ H_accel) @ P
 
-    # ── Detekcja faz — State Machine ─────────────────────────────────────────
-    v_z_est  = x[4]                         # prędkość pionowa z EKF
-    var_a    = float(np.var(
-        a_norm_all[max(0, k-12):k+1]))
+    # ── Sygnały do state machine ──────────────────────────────────────────────
+    v_z_est  = x[4]
+    p_z_est  = x[2]
+    var_a    = float(np.var(a_norm_all[max(0, k-12):k+1]))
     jerk_k   = jerk_raw[k]
     gyrop_k  = gyro_proxy[k]
 
+    # Historia prędkości — mediana jest odporna na chwilowe zera od ZUPT
+    vz_history = np.roll(vz_history, -1)
+    vz_history[-1] = v_z_est
+    vz_median = float(np.median(vz_history))
+
+    # Warunek spoczynku — wszystkie cztery kryteria
     rest_cond = (
-        var_a   < ZUPT_VAR_THR   and
-        abs(v_z_est) < ZUPT_VEL_THR  and
-        jerk_k  < ZUPT_JERK_THR  and
-        gyrop_k < ZUPT_GYROP_THR
+        var_a          < ZUPT_VAR_THR  and
+        abs(v_z_est)   < ZUPT_VEL_THR  and
+        jerk_k         < ZUPT_JERK_THR and
+        gyrop_k        < ZUPT_GYROP_THR
     )
 
+    # Warunek turnaround — jesteśmy wyraźnie poniżej góry
+    below_top = p_z_top_set and (p_z_est < p_z_top - TURNAROUND_DROP_M)
+
+    # ── Przejścia stanów ──────────────────────────────────────────────────────
     if state == REST:
         if rest_cond:
             exit_cnt = 0
+            # Zapamiętaj pozycję górną przy pierwszym REST
+            if not p_z_top_set:
+                p_z_top     = p_z_est
+                p_z_top_set = True
         else:
             exit_cnt += 1
             if exit_cnt >= ZUPT_HYSTER:
-                # Wychodzi z REST — kierunek v_z decyduje o fazie
-                state    = ECCENTRIC if v_z_est <= 0 else CONCENTRIC
+                # Wychodzi z REST — mediana v_z decyduje o kierunku
+                state    = ECCENTRIC if vz_median <= 0 else CONCENTRIC
                 conf_cnt = 0
                 exit_cnt = 0
 
     elif state == ECCENTRIC:
-        # Turnaround: prędkość pionowa zmienia znak na dodatni
-        if v_z_est > 0.03:
-            state = TURNAROUND
-        # Jeśli znowu nieruchomy — wróć do REST
-        elif rest_cond:
+        # TURNAROUND: jesteśmy odpowiednio nisko i v_z ≈ 0 lub rośnie
+        # Używamy mediany żeby ZUPT (v=0) nie blokował detekcji
+        if below_top and (rest_cond or vz_median >= -ZUPT_VEL_THR):
             conf_cnt += 1
-            if conf_cnt >= ZUPT_CONFIRM:
-                state    = REST
+            if conf_cnt >= 4:   # krótsza hystereza — turnaround jest szybki
+                state    = TURNAROUND
                 conf_cnt = 0
         else:
             conf_cnt = 0
 
     elif state == TURNAROUND:
-        # Z TURNAROUND wychodzimy gdy prędkość jest wyraźnie dodatnia
-        if v_z_est > 0.08:
-            state = CONCENTRIC
-        elif rest_cond:
+        # CONCENTRIC: mediana v_z wyraźnie dodatnia — push się zaczął
+        if vz_median > ZUPT_VEL_THR and below_top:
+            state    = CONCENTRIC
+            conf_cnt = 0
+        # Wróć do REST jeśli coś poszło nie tak (za mały ruch)
+        elif not below_top and rest_cond:
             conf_cnt += 1
             if conf_cnt >= ZUPT_CONFIRM:
                 state    = REST
@@ -250,10 +287,18 @@ for k in range(N):
             conf_cnt = 0
 
     elif state == CONCENTRIC:
-        # Wróć do REST gdy nieruchomy (koniec repu)
-        if rest_cond:
+        # REST: wróciłeś na górę — pozycja blisko p_z_top i nieruchomy
+        at_top = p_z_top_set and (p_z_est > p_z_top - TURNAROUND_DROP_M * 0.5)
+        if rest_cond and at_top:
             conf_cnt += 1
             if conf_cnt >= ZUPT_CONFIRM:
+                state    = REST
+                p_z_top  = p_z_est   # aktualizuj pozycję góry
+                conf_cnt = 0
+        elif rest_cond:
+            # Nieruchomy ale jeszcze nie na górze — czekaj
+            conf_cnt += 1
+            if conf_cnt >= ZUPT_CONFIRM * 2:
                 state    = REST
                 conf_cnt = 0
         else:
@@ -261,12 +306,13 @@ for k in range(N):
 
     phase[k] = state
 
-    # ── ZUPT: EKF update z pomiarem v=0 ──────────────────────────────────────
-    # Odpala w REST oraz w TURNAROUND (sztanga chwilę stoi)
+    # ── ZUPT ─────────────────────────────────────────────────────────────────
+    # REST: pewny spoczynek → pełny reset
+    # TURNAROUND: sztanga chwilę stoi na klatce → reset z luźniejszym progiem
     do_zupt = (state == REST) or (
         state == TURNAROUND and
-        abs(v_z_est) < ZUPT_VEL_THR * 1.5 and
-        var_a < ZUPT_VAR_THR * 3.0
+        abs(v_z_est)   < ZUPT_VEL_THR * 2.0 and
+        var_a          < ZUPT_VAR_THR * 4.0
     )
 
     if do_zupt:

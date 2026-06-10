@@ -14,7 +14,7 @@ FRAME_FMT  = '<hhhhhhhHI'
 FRAME_SIZE = struct.calcsize(FRAME_FMT)   # == 20
 assert FRAME_SIZE == 20, f"Oczekiwano 20, got {FRAME_SIZE}"
 
-OUTPUT_CSV = "w8band_data.csv"
+OUTPUT_CSV = "w8band_data2.csv"
 
 frames: list[tuple] = []
 total_raw_bytes = 0
@@ -80,8 +80,9 @@ async def main():
         await client.start_notify(CHAR_DATA_UUID, on_notify)
         
         # 2. Wyślij START (0x01)
-        print("Wysyłam START → Masz 8 sekund na ruch...")
-        await client.write_gatt_char(CHAR_CTRL_UUID, bytearray([0x01]), response=True)
+        print("wpisz 1 zeby zaczac")
+        if(input() == "1"):
+            await client.write_gatt_char(CHAR_CTRL_UUID, bytearray([0x01]), response=True)
 
         print("Czekam na dane (Nagrywanie -> Przesyłanie).")
         print("Skrypt wyłączy się AUTOMATYCZNIE, gdy nRF52 wyśle sygnał końca.")
@@ -89,7 +90,7 @@ async def main():
         # 3. Dynamiczne oczekiwanie (max 40 sekund jako bezpiecznik)
         try:
             # await.wait_for zamraża pętlę do momentu wywołania 'transfer_complete.set()'
-            await asyncio.wait_for(transfer_complete.wait(), timeout=40.0)
+            await asyncio.wait_for(transfer_complete.wait(), timeout=60.0)
             print(f"Zakończono nasłuch na polecenie urządzenia!")
         except asyncio.TimeoutError:
             print("\n[TIMEOUT] Minęło 40s a sygnał EOF nie dotarł. Rozłączam awaryjnie!")
