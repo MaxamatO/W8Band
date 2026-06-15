@@ -9,6 +9,12 @@
 #define TAG_GAME_ROTATION_VECTOR 0x13u
 #define TAG_ACCELEROMETER 0x02u
 
+#define WAKEUP_INT1 PIN_A3
+#define WAKEUP_INT2 PIN_A1
+#define CS_PIN A2
+
+#define WU_THS 5
+
 #define IMU_FREQ 120.0f
 #define RECORDING_TIME_MS 8000
 
@@ -26,6 +32,13 @@
 // -------------------------------------------------------------------
 namespace w8band
 {
+
+enum class StateMachine : uint8_t
+{
+    IDLE,
+    ARMED,
+    RECORDING
+};
 
 struct __attribute__((packed)) SamplePacket
 {
@@ -47,6 +60,7 @@ private:
     bool InitLsm();
     void InitBle();
     void SendBLEData();
+    void InitWakeup();
 
     static void ConnectCallback(uint16_t connHandle);
     static void DisconnectCallback(uint16_t connHandle, uint8_t reason);
@@ -69,6 +83,8 @@ private:
     int32_t m_LatestAccel[3] = {}; // mg
     bool m_HaveFreshQuat = false;
     bool m_HaveFreshAccel = false;
+
+    StateMachine m_CurrentState;
 };
 
 } // namespace w8band
