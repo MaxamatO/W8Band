@@ -3,7 +3,7 @@
 #include <LSM6DSV16XSensor.h>
 #include <Wire.h>
 
-w8band::W8Band Band(Wire);
+w8band::W8Band *Band = nullptr;
 
 void setup()
 {
@@ -13,7 +13,8 @@ void setup()
         yield();
     }
     Wire.begin();
-    Band.Init();
+    Band = new w8band::W8Band(Wire);
+    Band->Init();
 }
 
-void loop() { Band.Update(); }
+void loop() { Band->Update(); }
