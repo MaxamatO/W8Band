@@ -1,6 +1,3 @@
-1. Komunikacja BLE z telefonem
-2. Przesyl danych na telefon
-3. Obrobka danych poprawna w pythonie
-4. Przeniesienie obrobki z pythona na c++ do mikrokontrolera
-5. Wyslanie obrobionych danych do wyswietlania 
-6. Rendering na aplikacji
+do inzynierki:
+Przeniesc obliczenia do MCU, przygotowac pod to pipeline.
+Nastepnie przeniesc to z freeRTOS na Zephyr, zeby wykorzystac optymalizacje oferowana przez RTOS

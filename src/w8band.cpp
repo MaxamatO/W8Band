@@ -270,12 +270,6 @@ void W8Band::Update()
     }
 }
 
-// -------------------------------------------------------------------
-// Send one sample per notify packet (20 B = default MTU payload)
-// At 120Hz × 8s = ~960 samples × 20B = 19.2 kB
-// At 15ms connection interval: 960 × 15ms = 14.4s transfer time
-// → receiver should wait at least 15s after recording ends
-// -------------------------------------------------------------------
 void W8Band::SendBLEData()
 {
     m_CurrentState = StateMachine::IDLE;
@@ -303,12 +297,11 @@ void W8Band::SendBLEData()
         if(ok)
         {
             sent++;
-            // Yield every 8 packets so the SoftDevice stack can breathe
             if(sent % 8 == 0)
                 delay(1);
         } else
         {
-            delay(2); // stack busy, retry same packet
+            delay(2);
         }
     }
     SamplePacket eof;
@@ -336,7 +329,6 @@ void W8Band::SendBLEData()
     m_ControlCharacteristic.write8(0);
 }
 
-// -------------------------------------------------------------------
 void W8Band::WriteCallback(uint16_t, BLECharacteristic *, uint8_t *data,
                            uint16_t len)
 {
@@ -368,9 +360,7 @@ void W8Band::WriteCallback(uint16_t, BLECharacteristic *, uint8_t *data,
 void W8Band::ConnectCallback(uint16_t conn_hdl)
 {
     Serial.println("BLE connected");
-    // Request larger MTU – central may or may not honour it.
-    // If it does, Bleak will see mtu_size > 23 and we could batch packets.
-    // If not, 20-byte single-sample packets still work fine.
+
     BLEConnection *conn = Bluefruit.Connection(conn_hdl);
     if(conn)
         conn->requestMtuExchange(247);

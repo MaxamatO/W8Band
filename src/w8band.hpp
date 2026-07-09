@@ -20,18 +20,6 @@
 
 #define PRE_RECORD_SAMPLES 120
 
-// -------------------------------------------------------------------
-// Wire format – 20 bytes, little-endian, no MTU negotiation needed:
-//
-//   int16  Qw Qx Qy Qz   [8 B]   Q1.14 fixed-point  (×16384 → int16)
-//   int16  Ax Ay Az       [6 B]   milligravity [mg]
-//   uint16 seq            [2 B]   sequence counter (detect lost packets)
-//   uint32 timestamp_ms   [4 B]   millis() on nRF
-//
-// Total: 20 bytes  →  Python struct '<4h3hHI'
-// 20 samples per BLE notify (20×20 = 400 B, but stack sends up to
-// floor(notify_max/20) samples; we cap at 1 to be safe with MTU=23)
-// -------------------------------------------------------------------
 namespace w8band
 {
 
@@ -85,7 +73,7 @@ private:
     uint16_t m_PreIndex = 0;
     uint16_t m_PreCount = 0;
 
-    float m_LatestQuat[4] = {};    // Qw Qx Qy Qz  (float, converted on store)
+    float m_LatestQuat[4] = {};    // Qw Qx Qy Qz
     int32_t m_LatestAccel[3] = {}; // mg
     bool m_HaveFreshQuat = false;
     bool m_HaveFreshAccel = false;
