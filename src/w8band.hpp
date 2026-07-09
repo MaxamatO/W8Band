@@ -13,39 +13,30 @@
 #define WAKEUP_INT2 PIN_A1
 #define CS_PIN A2
 
-#define WU_THS 5
+#define WU_THS 10
 
 #define IMU_FREQ 120.0f
-#define RECORDING_TIME_MS 8000
+#define RECORDING_TIME_MS 4000
 
-// -------------------------------------------------------------------
-// Wire format – 20 bytes, little-endian, no MTU negotiation needed:
-//
-//   int16  Qw Qx Qy Qz   [8 B]   Q1.14 fixed-point  (×16384 → int16)
-//   int16  Ax Ay Az       [6 B]   milligravity [mg]
-//   uint16 seq            [2 B]   sequence counter (detect lost packets)
-//   uint32 timestamp_ms   [4 B]   millis() on nRF
-//
-// Total: 20 bytes  →  Python struct '<4h3hHI'
-// 20 samples per BLE notify (20×20 = 400 B, but stack sends up to
-// floor(notify_max/20) samples; we cap at 1 to be safe with MTU=23)
-// -------------------------------------------------------------------
+#define PRE_RECORD_SAMPLES 120
+
 namespace w8band
 {
 
 enum class StateMachine : uint8_t
 {
     IDLE,
+    BUFFERRING,
     ARMED,
     RECORDING
 };
 
 struct __attribute__((packed)) SamplePacket
 {
-    int16_t q[4]; // Qw Qx Qy Qz  Q1.14
-    int16_t a[3]; // mg
-    uint16_t seq;
-    uint32_t timestamp_ms;
+    int16_t q[4];          // Qw Qx Qy Qz  Q1.14 8 bytes
+    int16_t a[3];          // mg                 6 bytes
+    uint16_t seq;          //                    2 bytes
+    uint32_t timestamp_ms; //                    4 bytes
 };
 static_assert(sizeof(SamplePacket) == 20, "SamplePacket must be 20 bytes");
 
@@ -78,8 +69,11 @@ private:
     uint16_t m_Seq = 0;
 
     std::vector<SamplePacket> m_Data;
+    SamplePacket m_PreBuffer[PRE_RECORD_SAMPLES];
+    uint16_t m_PreIndex = 0;
+    uint16_t m_PreCount = 0;
 
-    float m_LatestQuat[4] = {};    // Qw Qx Qy Qz  (float, converted on store)
+    float m_LatestQuat[4] = {};    // Qw Qx Qy Qz
     int32_t m_LatestAccel[3] = {}; // mg
     bool m_HaveFreshQuat = false;
     bool m_HaveFreshAccel = false;

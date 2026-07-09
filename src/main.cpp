@@ -8,7 +8,8 @@ w8band::W8Band *Band = nullptr;
 void setup()
 {
     Serial.begin(115200);
-    while(!Serial)
+    uint32_t t = millis();
+    while(!Serial && (millis() - t < 2000))
     {
         yield();
     }
