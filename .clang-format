@@ -32,7 +32,7 @@ KeepEmptyLinesAtTheStartOfBlocks: false
 Language: Cpp
 MaxEmptyLinesToKeep: 1
 NamespaceIndentation: None
-PenaltyExcessCharacter: 100
+PenaltyExcessCharacter: 10
 PenaltyReturnTypeOnItsOwnLine: 1
 PointerAlignment: Right
 SortIncludes: true

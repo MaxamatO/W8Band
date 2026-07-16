@@ -1,3 +1,8 @@
 do inzynierki:
 Przeniesc obliczenia do MCU, przygotowac pod to pipeline.
 Nastepnie przeniesc to z freeRTOS na Zephyr, zeby wykorzystac optymalizacje oferowana przez RTOS
+
+
+Jakies info do obliczen:
+1. Gyro bias:
+    Average of readings over time.
