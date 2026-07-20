@@ -1,6 +1,7 @@
 #include "CalibrationState.hpp"
 
 #define SAMPLES_TO_DISCARD 30
+#define CALIBRATION_TIMEOUT_MS 6000
 
 namespace w8band::StateMachine
 {
@@ -28,6 +29,8 @@ static void CalculateMagnitude(data::SamplePacket &rPacket, float &rAccelMag,
     rGyroMag = std::sqrt(qx * qx + qy * qy + qz * qz);
 }
 
+static void NormaliseQuaternion() {}
+
 void CalibrationState::OnEnter()
 {
     m_rContext.m_rLsmServiceManager.ResetFIFO();
@@ -40,6 +43,12 @@ void CalibrationState::OnExit() {}
 
 void CalibrationState::Update()
 {
+    if(millis() - m_StartedAtMs > CALIBRATION_TIMEOUT_MS
+       && m_Phase != CalibrationPhase::Done)
+    {
+        m_Phase = CalibrationPhase::Failed;
+    }
+
     data::SamplePacket packet;
     m_rContext.m_rLsmServiceManager.ObtainData(packet);
 
@@ -55,8 +64,8 @@ void CalibrationState::Update()
         StillnessWaitHandler(packet);
         break;
     case CalibrationPhase::Accumulating: AccumulatingHandler(packet); break;
-    case CalibrationPhase::Done: break;
-    case CalibrationPhase::Failed: break;
+    case CalibrationPhase::Done: CalibrationDoneHandler(); break;
+    case CalibrationPhase::Failed: CalibratingErrorHandler(); break;
     default: break;
     }
 }
@@ -72,6 +81,7 @@ void CalibrationState::AccumulatingHandler(data::SamplePacket &rPacket)
     if(!m_Window.isStill(ACCEL_VAR_THS, GYRO_VAR_THS))
     {
         Serial.println("Not Still");
+        m_BiasAccumulator.Reset();
         m_Phase = CalibrationPhase::WaitingForStillness;
         return;
     }
@@ -88,6 +98,13 @@ void CalibrationState::StillnessWaitHandler(data::SamplePacket &rPacket)
         Serial.println("Still");
         m_Phase = CalibrationPhase::Accumulating;
         return;
+    }
+
+    m_BiasAccumulator.Add(rPacket);
+
+    if(m_BiasAccumulator.IsFull(CALIBRATION_DATA_COUNT))
+    {
+        m_Phase == CalibrationPhase::Done;
     }
 }
 

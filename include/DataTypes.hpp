@@ -26,4 +26,18 @@ struct __attribute__((packed)) SamplePacket
 };
 static_assert(sizeof(SamplePacket) == 20, "SamplePacket must be 20 bytes");
 
+/// @brief Packed struct Vec3 used to return calculated accelerometer bias in x,y,z axes
+struct __attribute__((packed)) AccBiasVec3
+{
+    /// @brief ax bias
+    int32_t axBias;
+
+    /// @brief ay bias
+    int32_t ayBias;
+
+    /// @brief az bias
+    int32_t azBias;
+};
+static_assert(sizeof(AccBiasVec3) == 12, "AccBiasVec3 must be 12 bytes");
+
 } // namespace data

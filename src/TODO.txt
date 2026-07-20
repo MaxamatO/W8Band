@@ -5,11 +5,23 @@ Nastepnie przeniesc to z freeRTOS na Zephyr, zeby wykorzystac optymalizacje ofer
 
 Jakies info do obliczen:
 1. Gyro bias:
-    Average of readings over time for each axis.
+    Average of readings over time for each axis - dont really need it? SFLP gives quaternions with bias taken into account
 2. Accell bias:
+    Average of readings - already done, saved to datacontext
 
 3. obrot do ukladu globalnego akceleracji:
-    3.1 odczyt quat
-    3.2 odczyt Accell
-    3.3 rotacja accell do ukladu globalnego za pomoca quat
+    3.1 odczyt quat - done
+    3.2 odczyt Accell - done
+    3.3 rotacja accell do ukladu globalnego za pomoca quat - TBD (for now we have prepared structures for rotation)
+        Rotation will be done isnide CalibrationDone phase - normalise quaternion, rotate accel local body to world body
     3.4 odjecie a_global - g_global
+4. Buffering state 
+    4.1 Save data from IMU using cyclic buffer, to not miss any data when entering RecordingState on WAKE UP interrupt from IMU, since it happens IN MOTION, not before
+5. Armed state
+    5.1 Drop all data from cyclic buffer into end data and enter Recording State on WU_INT
+6. Recording State
+    6.1 Record all data untill device is STILL again - reuse already working WaitingForStillness? By chcecking that, we know when to end recording
+        We can also add a TIMEOUT in order to cut off recording after it takes too long - in case of a bug? Or user waiting too long in their execrice?
+    6.2 When we can determien that we are stopped again, we TRANSITION INTO ProcessingState
+7. Processing State
+    7.1 

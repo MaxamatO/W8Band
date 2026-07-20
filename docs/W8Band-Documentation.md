@@ -15,3 +15,20 @@ lorem ipsum
 lorem ipsum
 
 ## State Machine
+
+### **CalibrationState**
+
+StateMachine's State responsible for handling proper device calibration.
+Triggerred by Client by sending "Calibrate" command.<br>
+CalibrationState is split into **CalibrationPhases**:
+
+- WaitingForStillness - Device caluclates variance of both acceleration and gyroscope deciding if device is still.
+- Accumulating - Device calculates acceleration mean in all 3 axes, and saves it into DataContext as bias. If during that phase, Device stops being still, we go back into WaitingForStillness phase, reseting **BiasAccumulator**
+
+enum class CalibrationPhase
+{
+    WaitingForStillness,
+    Accumulating,
+    Done,
+    Failed
+};

@@ -2,6 +2,7 @@
 #include "DataContext.hpp"
 #include "IState.hpp"
 #include "W8BandFsm.hpp"
+#include "helpers/BiasAccumulator.hpp"
 #include "helpers/SlidingWindow.hpp"
 #include <string>
 
@@ -31,9 +32,16 @@ class CalibrationState : public fsm::IState<DataContext, StateId>
 public:
     CalibrationState(DataContext &rDataCtx, W8BandFsm &rFsm);
 
+    /// @brief @see IState::OnEnter()
     void OnEnter() override;
+
+    /// @brief @see IState::OnExit()
     void OnExit() override;
+
+    /// @brief @see IState::Update()
     void Update() override;
+
+    /// @brief @see IState::GetSateId()
     StateId GetStateId() const override;
 
     /// @brief Human-readable name, kept separate from GetStateId() so the
@@ -47,8 +55,11 @@ private:
     /// @brief Used for determining phase of calibration
     CalibrationPhase m_Phase;
 
-    /// @brief Wind
+    /// @brief Peephole/window struct used for determining device's stillness
     helpers::StillnessDetector<WINDOW_SIZE> m_Window;
+
+    /// @brief Struct used to calcualte Accelerometer bias in flight
+    BiasAccumulator m_BiasAccumulator;
 
     /// @brief Used for calculating gravity
     std::array<data::SamplePacket, CALIBRATION_DATA_COUNT> m_CalibrationBuffer{0};

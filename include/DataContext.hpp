@@ -36,6 +36,13 @@ public:
 
     /// @brief Set by ISR in order to start recording data
     bool m_WakeUpDetected;
+
+    /// @brief Accelerometer bias computer by CalibrationState. Valid when
+    /// m_CalibrationValid == true
+    data::AccBiasVec3 m_AccelBias{};
+
+    /// @brief True once CalibrationState has produced a bias.
+    bool m_CalibrationValid = false;
 };
 
 } // namespace w8band::DataContext
