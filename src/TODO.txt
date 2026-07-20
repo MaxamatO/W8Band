@@ -5,4 +5,11 @@ Nastepnie przeniesc to z freeRTOS na Zephyr, zeby wykorzystac optymalizacje ofer
 
 Jakies info do obliczen:
 1. Gyro bias:
-    Average of readings over time.
+    Average of readings over time for each axis.
+2. Accell bias:
+
+3. obrot do ukladu globalnego akceleracji:
+    3.1 odczyt quat
+    3.2 odczyt Accell
+    3.3 rotacja accell do ukladu globalnego za pomoca quat
+    3.4 odjecie a_global - g_global
