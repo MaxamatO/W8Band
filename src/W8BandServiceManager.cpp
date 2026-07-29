@@ -1,4 +1,5 @@
 #include "W8BandServiceManager.hpp"
+#include <Arduino.h>
 
 namespace w8band
 {
@@ -6,8 +7,6 @@ namespace w8band
 static W8BandServiceManager *instance = nullptr;
 
 volatile bool v_WakeUpDetected = false;
-
-void WakeUpISR1();
 
 W8BandServiceManager::W8BandServiceManager(Hardware::BleServiceManager &rBleSM,
                                            Hardware::LsmServiceManager &rLsmSM,
@@ -25,6 +24,9 @@ void W8BandServiceManager::Init()
     m_Fsm.AddState(StateMachine::StateId::CalibrationState,
                    std::make_unique<StateMachine::CalibrationState>(
                        m_rDataContext, m_Fsm));
+    m_Fsm.AddState(
+        StateMachine::StateId::BufferringState,
+        std::make_unique<StateMachine::BufferringState>(m_rDataContext, m_Fsm));
 
     m_Fsm.AddState(
         StateMachine::StateId::ArmedState,
@@ -34,7 +36,15 @@ void W8BandServiceManager::Init()
 
 void W8BandServiceManager::StartApplication() {}
 
-void W8BandServiceManager::Update() { m_Fsm.Update(); }
+void W8BandServiceManager::Update()
+{
+    if(v_WakeUpDetected)
+    {
+        m_rDataContext.m_WakeUpDetected = true;
+        v_WakeUpDetected = false;
+    }
+    m_Fsm.Update();
+}
 
 void W8BandServiceManager::RequestStateChange(StateMachine::StateId stateId)
 { m_Fsm.RequestTransition(stateId); }
@@ -187,5 +197,8 @@ void W8BandServiceManager::RequestStateChange(StateMachine::StateId stateId)
 //     }
 // }
 
-void WakeUpISR1() { v_WakeUpDetected = true; }
+void W8BandServiceManager::AttachWakeUptInterrupt(uint16_t interruptPin)
+{ attachInterrupt(digitalPinToInterrupt(interruptPin), WakeUpISR1, RISING); }
+
+void W8BandServiceManager::WakeUpISR1() { v_WakeUpDetected = true; }
 } // namespace w8band

@@ -19,17 +19,17 @@ Nastepnie przeniesc to z freeRTOS na Zephyr, zeby wykorzystac optymalizacje ofer
     3.2 odczyt Accell - done
 
     3.3 rotacja accell do ukladu globalnego za pomoca quat - TBD (for now we have prepared structures for rotation)
-        Rotation will be done isnide CalibrationDone phase - normalise quaternion, rotate accel local body to world body
+        Rotation will be done isnide CalibrationDone phase - normalise quaternion, rotate accel local body to world body - done
 
-    3.4 odjecie a_global - g_global
+    3.4 odjecie a_global - g_global - done
 
 4. Buffering state
 
-    4.1 Save data from IMU using cyclic buffer, to not miss any data when entering RecordingState on WAKE UP interrupt from IMU, since it happens IN MOTION, not before
+    4.1 Save data from IMU using cyclic buffer, to not miss any data when entering RecordingState on WAKE UP interrupt from IMU, since it happens IN MOTION, not before - done
 
 5. Armed state
 
-    5.1 Drop all data from cyclic buffer into end data and enter Recording State on WU_INT
+    5.1 Drop all data from cyclic buffer into end data and enter Recording State on WU_INT - TBD NEXT
 
 6. Recording State
 

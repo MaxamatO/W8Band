@@ -7,8 +7,28 @@ namespace w8band::StateMachine
 {
 namespace
 {
-constexpr float ACCEL_VAR_THS = 10.0f;
-constexpr float GYRO_VAR_THS = 10.0f;
+constexpr float ACCEL_VAR_THS = 15.0f;
+constexpr float GYRO_VAR_THS = 15.0f;
+void RotateWorldToBody(float qw, float qx, float qy, float qz, float vx,
+                       float vy, float vz, float &rOutX, float &rOutY,
+                       float &rOutZ)
+{
+    qx = -qx;
+    qy = -qy;
+    qz = -qz;
+
+    float cx = qy * vz - qz * vy;
+    float cy = qz * vx - qx * vz;
+    float cz = qx * vy - qy * vx;
+
+    float ccx = qy * cz - qz * cy;
+    float ccy = qz * cx - qx * cz;
+    float ccz = qx * cy - qy * cx;
+
+    rOutX = vx + 2.0f * qw * cx + 2.0f * ccx;
+    rOutY = vy + 2.0f * qw * cy + 2.0f * ccy;
+    rOutZ = vz + 2.0f * qw * cz + 2.0f * ccz;
+}
 }
 CalibrationState::CalibrationState(DataContext &rDataCtx, W8BandFsm &rFsm)
     : fsm::IState<DataContext, StateId>(rDataCtx), m_rFsm(rFsm)
@@ -43,11 +63,11 @@ void CalibrationState::OnExit() {}
 
 void CalibrationState::Update()
 {
-    if(millis() - m_StartedAtMs > CALIBRATION_TIMEOUT_MS
-       && m_Phase != CalibrationPhase::Done)
-    {
-        m_Phase = CalibrationPhase::Failed;
-    }
+    // if(millis() - m_StartedAtMs > CALIBRATION_TIMEOUT_MS
+    //    && m_Phase != CalibrationPhase::Done)
+    // {
+    //     m_Phase = CalibrationPhase::Failed;
+    // }
 
     data::SamplePacket packet;
     m_rContext.m_rLsmServiceManager.ObtainData(packet);
@@ -85,6 +105,43 @@ void CalibrationState::AccumulatingHandler(data::SamplePacket &rPacket)
         m_Phase = CalibrationPhase::WaitingForStillness;
         return;
     }
+    m_BiasAccumulator.Add(rPacket);
+
+    if(m_BiasAccumulator.IsFull(CALIBRATION_DATA_COUNT))
+    {
+        m_Phase = CalibrationPhase::Done;
+    }
+}
+
+void CalibrationState::CalibrationDoneHandler()
+{
+    float qw = m_BiasAccumulator.GetMeanQw() / data::Q14_SCALE;
+    float qx = m_BiasAccumulator.GetMeanQx() / data::Q14_SCALE;
+    float qy = m_BiasAccumulator.GetMeanQy() / data::Q14_SCALE;
+    float qz = m_BiasAccumulator.GetMeanQz() / data::Q14_SCALE;
+
+    float norm = std::sqrt(qw * qw + qx * qx + qy * qy + qz * qz);
+    qw /= norm;
+    qx /= norm;
+    qy /= norm;
+    qz /= norm;
+
+    float expectedGx;
+    float expectedGy;
+    float expectedGz;
+
+    RotateWorldToBody(qw, qx, qy, qz, 0.0f, 0.0f, data::GRAVITY_MG, expectedGx,
+                      expectedGy, expectedGz);
+
+    float meanAx = m_BiasAccumulator.GetMeanAx();
+    float meanAy = m_BiasAccumulator.GetMeanAy();
+    float meanAz = m_BiasAccumulator.GetMeanAz();
+
+    m_rContext.m_AccelBias.axBias = static_cast<int32_t>(meanAx - expectedGx);
+    m_rContext.m_AccelBias.ayBias = static_cast<int32_t>(meanAy - expectedGy);
+    m_rContext.m_AccelBias.azBias = static_cast<int32_t>(meanAz - expectedGz);
+    m_rContext.m_CalibrationValid = true;
+    m_rFsm.RequestTransition(StateId::BufferringState);
 }
 
 void CalibrationState::StillnessWaitHandler(data::SamplePacket &rPacket)
@@ -104,11 +161,19 @@ void CalibrationState::StillnessWaitHandler(data::SamplePacket &rPacket)
 
     if(m_BiasAccumulator.IsFull(CALIBRATION_DATA_COUNT))
     {
-        m_Phase == CalibrationPhase::Done;
+        m_Phase = CalibrationPhase::Done;
+        return;
     }
+}
+
+void CalibrationState::CalibratingErrorHandler()
+{
+    Serial.println("Entered error state");
+    m_rContext.m_CalibrationValid = false;
 }
 
 StateId CalibrationState::GetStateId() const
 { return StateId::CalibrationState; }
-std::string CalibrationState::GetStateName() { return "CalibrationState"; }
+std::string CalibrationState::GetStateName() const
+{ return "CalibrationState"; }
 } // namespace w8band::StateMachine

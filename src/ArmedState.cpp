@@ -31,6 +31,6 @@ void ArmedState::Update()
 
 StateId ArmedState::GetStateId() const { return StateId::ArmedState; }
 
-std::string ArmedState::GetStateName() { return "ArmedState"; }
+std::string ArmedState::GetStateName() const { return "ArmedState"; }
 
 } // namespace w8band::StateMachine

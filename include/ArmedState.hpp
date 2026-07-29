@@ -15,7 +15,7 @@ public:
     void Update() override;
     StateId GetStateId() const override;
 
-    static std::string GetStateName();
+    std::string GetStateName() const override;
 
 private:
     /// @brief Reference to FSM for requesting state change.

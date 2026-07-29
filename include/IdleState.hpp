@@ -21,7 +21,7 @@ public:
 
     /// @brief Human-readable name, kept separate from GetStateId() so the
     ///        FSM's internal lookups stay a cheap enum compare.
-    static std::string GetStateName();
+    std::string GetStateName() const override;
 
 private:
     W8BandFsm &m_rFsm;

@@ -1,6 +1,7 @@
 #pragma once
 #include "ArmedState.hpp"
 #include "BleServiceManager.hpp"
+#include "BufferringState.hpp"
 #include "CalibrationState.hpp"
 #include "DataContext.hpp"
 #include "IdleState.hpp"
@@ -34,10 +35,14 @@ public:
     /// @param stateId State to which transition will occurr.
     void RequestStateChange(StateMachine::StateId stateId);
 
+    void AttachWakeUptInterrupt(uint16_t interruptPin);
+
 private:
     bool m_IsRecording = false;
     unsigned long m_RecordingStart = 0;
     uint16_t m_Seq = 0;
+
+    static void WakeUpISR1();
 
     DataContext &m_rDataContext;
     Hardware::BleServiceManager &m_rBleServiceManager;

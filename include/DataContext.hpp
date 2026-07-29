@@ -43,6 +43,10 @@ public:
 
     /// @brief True once CalibrationState has produced a bias.
     bool m_CalibrationValid = false;
+
+    /// @brief Helper method to populate rolling buffer to have continous data.
+    /// @param[in] rPacket Reference to packet to push to buffer
+    void PushToPreBuffer(data::SamplePacket &rPacket);
 };
 
 } // namespace w8band::DataContext

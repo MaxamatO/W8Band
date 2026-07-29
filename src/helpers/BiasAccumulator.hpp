@@ -1,3 +1,4 @@
+#pragma once
 #include "DataTypes.hpp"
 
 struct BiasAccumulator
@@ -10,6 +11,11 @@ struct BiasAccumulator
         m_SumAy += rPacket.a[1];
         m_SumAz += rPacket.a[2];
 
+        m_SumQw += rPacket.q[0];
+        m_SumQx += rPacket.q[1];
+        m_SumQy += rPacket.q[2];
+        m_SumQz += rPacket.q[3];
+
         m_Count++;
     }
 
@@ -20,6 +26,11 @@ struct BiasAccumulator
     float GetMeanAx() const { return m_SumAx / static_cast<float>(m_Count); }
     float GetMeanAy() const { return m_SumAy / static_cast<float>(m_Count); }
     float GetMeanAz() const { return m_SumAz / static_cast<float>(m_Count); }
+
+    float GetMeanQw() const { return m_SumQw / static_cast<float>(m_Count); }
+    float GetMeanQx() const { return m_SumQx / static_cast<float>(m_Count); }
+    float GetMeanQy() const { return m_SumQy / static_cast<float>(m_Count); }
+    float GetMeanQz() const { return m_SumQz / static_cast<float>(m_Count); }
 
 private:
     float m_SumAx = 0, m_SumAy = 0, m_SumAz = 0;

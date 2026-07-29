@@ -1,4 +1,5 @@
 #include "LsmServiceManager.hpp"
+#include "DataTypes.hpp"
 
 #define IMU_FREQ 120.0f
 #define WU_THS 10
@@ -20,7 +21,7 @@ unsigned long startTime, elapsedTime;
 // Q1.14 scale: multiply float [-1,1] by 16384 and clamp to int16
 static inline int16_t toQ14(float v)
 {
-    int32_t x = (int32_t)(v * 16384.0f);
+    int32_t x = (int32_t)(v * data::Q14_SCALE);
     if(x > 32767)
         x = 32767;
     if(x < -32768)
@@ -60,7 +61,7 @@ bool LsmServiceManager::InitLsm()
     status |= m_Imu.FIFO_Set_Mode(LSM6DSV16X_STREAM_MODE);
     delay(20);
 
-    // InitWakeup(status);
+    InitWakeup(status);
     return (status == LSM6DSV16X_OK);
 }
 
@@ -142,6 +143,8 @@ void LsmServiceManager::ObtainData(data::SamplePacket &rPacketOut)
 
         if(m_HaveFreshAccel && m_HaveFreshQuat)
         {
+            elapsedTime = millis() - startTime;
+
             rPacketOut.q[0] = toQ14(m_LatestQuat[0]);
             rPacketOut.q[1] = toQ14(m_LatestQuat[1]);
             rPacketOut.q[2] = toQ14(m_LatestQuat[2]);
@@ -151,7 +154,7 @@ void LsmServiceManager::ObtainData(data::SamplePacket &rPacketOut)
             rPacketOut.a[1] = (int16_t)m_LatestAccel[1];
             rPacketOut.a[2] = (int16_t)m_LatestAccel[2];
 
-            elapsedTime = millis() - startTime;
+            rPacketOut.timestamp_ms = elapsedTime;
         }
     }
 }

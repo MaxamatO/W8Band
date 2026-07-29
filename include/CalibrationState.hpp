@@ -46,7 +46,7 @@ public:
 
     /// @brief Human-readable name, kept separate from GetStateId() so the
     ///        FSM's internal lookups stay a cheap enum compare.
-    static std::string GetStateName();
+    std::string GetStateName() const override;
 
 private:
     /// @brief Reference to State Machine for state transition
@@ -60,9 +60,6 @@ private:
 
     /// @brief Struct used to calcualte Accelerometer bias in flight
     BiasAccumulator m_BiasAccumulator;
-
-    /// @brief Used for calculating gravity
-    std::array<data::SamplePacket, CALIBRATION_DATA_COUNT> m_CalibrationBuffer{0};
 
     /// @brief Count of samples left for discarding - trash before FIFO is
     /// stable. Set OnEnter

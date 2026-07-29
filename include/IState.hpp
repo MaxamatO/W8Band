@@ -24,6 +24,8 @@ public:
     /// @return one of StateId defined in enum class StateId
     virtual TStateId GetStateId() const = 0;
 
+    virtual std::string GetStateName() const { return "BaseState"; }
+
 protected:
     explicit IState(TContext &rContext) : m_rContext(rContext) {}
 

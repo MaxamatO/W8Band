@@ -113,6 +113,8 @@ private:
             m_pCurrentState->OnExit();
         }
         m_pCurrentState = pNextState;
+        Serial.println("Applying transition to: ");
+        Serial.print(m_pCurrentState->GetStateName().c_str());
         m_pCurrentState->OnEnter();
     }
 

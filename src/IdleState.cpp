@@ -17,5 +17,5 @@ void IdleState::Update()
 
 StateId IdleState::GetStateId() const { return StateId::IdleState; }
 
-std::string IdleState::GetStateName() { return "IdleState"; }
+std::string IdleState::GetStateName() const { return "IdleState"; }
 } // namespace w8band::StateMachine

@@ -12,7 +12,6 @@ bool W8BandLauncher::Initialize()
 {
     m_ErrorMessage = "";
     pinMode(WAKEUP_INT1, INPUT_PULLDOWN);
-    // attachInterrupt(digitalPinToInterrupt(WAKEUP_INT1), WakeUpISR1, RISING);
     if(!m_Lsm.InitLsm())
     {
         m_ErrorMessage = "Lsm init failed";
@@ -30,6 +29,7 @@ bool W8BandLauncher::Initialize()
         return false;
     }
     m_W8BandServiceManager->Init();
+    m_W8BandServiceManager->AttachWakeUptInterrupt(WAKEUP_INT1);
     return true;
 }
 
