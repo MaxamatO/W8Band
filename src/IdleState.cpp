@@ -10,10 +10,7 @@ void IdleState::OnEnter() {}
 void IdleState::OnExit() {}
 
 void IdleState::Update()
-{
-    Serial.println("Transfering to CALIBRATION");
-    m_rFsm.RequestTransition(StateId::CalibrationState);
-}
+{ m_rFsm.RequestTransition(StateId::CalibrationState); }
 
 StateId IdleState::GetStateId() const { return StateId::IdleState; }
 

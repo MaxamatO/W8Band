@@ -16,6 +16,10 @@ struct BiasAccumulator
         m_SumQy += rPacket.q[2];
         m_SumQz += rPacket.q[3];
 
+        m_SumGx += rPacket.gv[0];
+        m_SumGy += rPacket.gv[1];
+        m_SumGz += rPacket.gv[2];
+
         m_Count++;
     }
 
@@ -26,6 +30,10 @@ struct BiasAccumulator
     float GetMeanAx() const { return m_SumAx / static_cast<float>(m_Count); }
     float GetMeanAy() const { return m_SumAy / static_cast<float>(m_Count); }
     float GetMeanAz() const { return m_SumAz / static_cast<float>(m_Count); }
+
+    float GetMeanGx() const { return m_SumGx / static_cast<float>(m_Count); }
+    float GetMeanGy() const { return m_SumGy / static_cast<float>(m_Count); }
+    float GetMeanGz() const { return m_SumGz / static_cast<float>(m_Count); }
 
     float GetMeanQw() const { return m_SumQw / static_cast<float>(m_Count); }
     float GetMeanQx() const { return m_SumQx / static_cast<float>(m_Count); }

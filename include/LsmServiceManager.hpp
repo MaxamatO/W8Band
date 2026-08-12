@@ -23,7 +23,8 @@ public:
     /// @param[out] rPacketOut Struct passed by reference for storing loaded
     /// data. For more infromation about struct @see SamplePacket in
     /// DataTypes.hpp
-    void ObtainData(data::SamplePacket &rPacketOut);
+    /// @return True if obtained data consists of 3 elements - q, a, gv. False if no TAG found
+    bool ObtainData(data::SamplePacket &rPacketOut);
 
     /// @brief Method used to fill provided buffer data for calibration.
     void FillBufferData();
@@ -54,11 +55,17 @@ private:
     /// @brief Latest acceleration data obtained from LSM6DSV16X
     int32_t m_LatestAccel[3] = {};
 
+    /// @brief Latest gravity vector data obtained from LSM6DSV16X
+    float m_LatestGravityVector[3] = {};
+
     /// @brief Indicator if obtained quaternions are recent
     bool m_HaveFreshQuat = false;
 
     /// @brief Indicator if obtained acceleration values are recent
     bool m_HaveFreshAccel = false;
+
+    /// @brief Indicator if obtained Gravity Vector values are recent
+    bool m_HaveFreshGV = false;
 };
 
 } // namespace w8band::lsm_service_manager

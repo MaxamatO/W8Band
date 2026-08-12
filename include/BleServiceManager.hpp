@@ -5,6 +5,8 @@
 namespace w8band::Hardware
 {
 
+/// @brief Class responsible for handling all BLE related functionalities:
+/// advertising, handling connections, sending/recieving data
 class BleServiceManager
 {
 public:
@@ -14,6 +16,8 @@ public:
     /// @brief Initialize BLE with default values provided by creator.
     /// @return True if initialization was successful, false otherwise.
     bool InitBle();
+
+    /// @brief Method called for sendling BLE Data.
     void SendBLEData();
 
     static void ConnectCallback(uint16_t connHandle);

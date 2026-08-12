@@ -1,11 +1,12 @@
 #pragma once
-#include "ArmedState.hpp"
 #include "BleServiceManager.hpp"
 #include "BufferringState.hpp"
 #include "CalibrationState.hpp"
 #include "DataContext.hpp"
 #include "IdleState.hpp"
 #include "LsmServiceManager.hpp"
+#include "ProcessingState.hpp"
+#include "RecordingState.hpp"
 #include <Arduino.h>
 #include <memory>
 #include <vector>
@@ -30,10 +31,6 @@ public:
 
     /// @brief Used to drive the FSM, called once per loop()
     void Update();
-
-    /// @brief Requests FSM transition to provided rStateId state
-    /// @param stateId State to which transition will occurr.
-    void RequestStateChange(StateMachine::StateId stateId);
 
     void AttachWakeUptInterrupt(uint16_t interruptPin);
 

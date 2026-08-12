@@ -51,9 +51,18 @@ public:
         float n = static_cast<float>(WindowSize);
         float accelVar
             = (m_SumSqAccel / n) - ((m_SumAccel / n) * (m_SumAccel / n));
-        float gyroVar
-            = (m_SumSqGyro / n) - ((m_SumGyro / n) * (m_SumGyro / n));
+        float gyroVar = (m_SumSqGyro / n) - ((m_SumGyro / n) * (m_SumGyro / n));
         return accelVar < accelValThresh && gyroVar < gyroValThresh;
+    }
+
+    float GetVarAccel()
+    {
+        if(!IsFull())
+        {
+            return -1.0f;
+        }
+        float n = static_cast<float>(WindowSize);
+        return (m_SumSqAccel / n) - ((m_SumAccel / n) * (m_SumAccel / n));
     }
 
 private:
