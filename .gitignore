@@ -12,3 +12,5 @@ __pycache__
 .DS_STORE
 
 *.drawio*
+
+deprecated/
