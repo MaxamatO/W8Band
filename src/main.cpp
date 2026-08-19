@@ -18,6 +18,43 @@ static void Checkpoint(int n)
     delay(1000);
 }
 
+void recoverI2CBus(uint8_t sclPin, uint8_t sdaPin)
+{
+    pinMode(sclPin, OUTPUT);
+    pinMode(sdaPin, INPUT_PULLUP);
+
+    // Generujemy do 9 impulsów zegara, aby czujnik dokończył wysyłanie
+    // zablokowanego bitu i puścił linię SDA (przeszedł w tryb NACK/STOP)
+    for(int i = 0; i < 9; i++)
+    {
+        digitalWrite(sclPin, LOW);
+        delayMicroseconds(5);
+        digitalWrite(sclPin, HIGH);
+        delayMicroseconds(5);
+
+        // Jeśli SDA jest HIGH, urządzenie zwolniło magistralę
+        if(digitalRead(sdaPin) == HIGH)
+        {
+            break;
+        }
+    }
+
+    // Na koniec generujemy sygnał STOP (SCL wysokie, SDA idzie z LOW na HIGH)
+    pinMode(sdaPin, OUTPUT);
+    digitalWrite(sclPin, LOW);
+    delayMicroseconds(5);
+    digitalWrite(sdaPin, LOW);
+    delayMicroseconds(5);
+    digitalWrite(sclPin, HIGH);
+    delayMicroseconds(5);
+    digitalWrite(sdaPin, HIGH);
+    delayMicroseconds(5);
+
+    // Przywracamy piny do domyślnego stanu, aby sprzętowe I2C (Wire) mogło przejąć kontrolę
+    pinMode(sclPin, INPUT);
+    pinMode(sdaPin, INPUT);
+}
+
 void setup()
 {
     pinMode(LED_BUILTIN, OUTPUT);
@@ -31,8 +68,10 @@ void setup()
     Checkpoint(1);
 
     Serial.begin(115200);
+    while(!Serial)
+        ;
     // CHECKPOINT 2: po Serial.begin()
-    Checkpoint(2);
+    // Checkpoint(2);
 
     uint32_t t = millis();
     while(!Serial && (millis() - t < 2000))
@@ -40,16 +79,19 @@ void setup()
         delay(10);
     }
     // CHECKPOINT 3: po petli czekania na Serial
-    Checkpoint(3);
+    // Checkpoint(3);
 
-    Serial.println("Halo");
-    Serial.flush();
+    // Serial.println("Halo");
+    delay(20);
     // CHECKPOINT 4: po probie wypisania Halo
     // Checkpoint(4);
+    recoverI2CBus(SCL, SDA);
     Wire.begin();
+    // Checkpoint(8);
     launcher.emplace();
     // CHECKPOINT 5: po skonstruowaniu launchera
-    // Checkpoint(5);
+    Serial.println("Halo");
+    Serial.flush();
 
     if(!launcher->Initialize())
     {

@@ -13,6 +13,10 @@
 /// Value in ms describing how long a signal must stay near-zero in order to fire end-of-motion
 #define END_OF_MOTION_DWELL_MS 250
 
+/// Value in ms describing for how long we will be appending data when device
+/// fired end-of-motion - for easier ZUPT processing
+#define POST_STOP_CAPTURE_MS 400
+
 /// @brief Describes current motion direction during Recording State
 enum class MotionDirection
 {
@@ -87,5 +91,11 @@ private:
 
     /// @brief Time in ms in which the device is in near zero state
     uint32_t m_NearZeroTimeMs;
+
+    /// @brief True if end-of-motion fired, and we want to keep on tracking
+    bool m_CapturingPostStop = false;
+
+    /// @brief Time in ms when m_CapturingPostStop was true.
+    uint32_t m_PostStopStartedMs = 0;
 };
 }

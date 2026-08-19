@@ -6,9 +6,10 @@ namespace w8band::StateMachine
 namespace
 {
 constexpr float MG_TO_MS2 = 9.80665f / 1000.0f; // G in MG = 0.00980665g
-constexpr float kUpThreshold = 0.14f;
-constexpr float kDownThreshold = -0.14f;
-constexpr float kHysteresis = 0.02f;
+constexpr float kUpThreshold = 0.2f;
+constexpr float kEndOfMotionVelocity = 0.25f;
+constexpr float kDownThreshold = -0.11f;
+constexpr float kHysteresis = 0.03f;
 }
 RecordingState::RecordingState(DataContext &rDataCtx, W8BandFsm &rFsm)
     : IState<DataContext, StateId>(rDataCtx), m_rFsm(rFsm)
@@ -43,11 +44,11 @@ void RecordingState::Update()
     IntegrateVelocityRT(packet);
     UpdateDirection();
     CheckForEndOfMotion();
-    if(millis() - m_rContext.m_RecordingStartedMs > RECORDING_TIMEOUT_MS)
-    {
-        Serial.println("Recording timeout reached.");
-        m_rFsm.RequestTransition(StateId::ProcessingState);
-    }
+    // if(millis() - m_rContext.m_RecordingStartedMs > RECORDING_TIMEOUT_MS)
+    // {
+    //     Serial.println("Recording timeout reached.");
+    //     m_rFsm.RequestTransition(StateId::ProcessingState);
+    // }
 }
 
 void RecordingState::IntegrateVelocityRT(data::SamplePacket &rPacket)
@@ -88,21 +89,30 @@ void RecordingState::IntegrateVelocityRT(data::SamplePacket &rPacket)
     m_CurrVelocityZ += (m_PrevWorldAz + worldAz_ms2) * 0.5f * dtSeconds;
     m_PrevWorldAz = worldAz_ms2;
     m_PrevTimestampMs = rPacket.timestamp_ms;
+
+    Serial.printf("v_z=%.4f m/s, a_z=%.4f m/s2\n", m_CurrVelocityZ, worldAz_ms2);
 }
 
 void RecordingState::CheckForEndOfMotion()
 {
-    if(!m_HasSeenGoingUp)
+    // if(!m_HasSeenGoingUp)
+    // {
+    //     m_IsNearZeroDwell = false;
+    //     return;
+    // }
+
+    // bool nearZero = (m_Direction == MotionDirection::NearZero);
+
+    // if(!nearZero)
+    // {
+    //     m_IsNearZeroDwell = false;
+    //     return;
+    // }
+
+    if(!m_HasSeenGoingUp || m_Direction != MotionDirection::NearZero)
     {
         m_IsNearZeroDwell = false;
-        return;
-    }
-
-    bool nearZero = (m_Direction == MotionDirection::NearZero);
-
-    if(!nearZero)
-    {
-        m_IsNearZeroDwell = false;
+        m_CapturingPostStop = false;
         return;
     }
 
@@ -120,9 +130,18 @@ void RecordingState::CheckForEndOfMotion()
     Serial.println("Velocity: ");
     Serial.print(m_CurrVelocityZ);
 
-    if(millis() - m_NearZeroTimeMs > END_OF_MOTION_DWELL_MS)
+    if(!m_CapturingPostStop)
     {
-        Serial.println("End of motion detected.");
+        if(millis() - m_NearZeroTimeMs >= END_OF_MOTION_DWELL_MS)
+        {
+            m_CapturingPostStop = true;
+            m_PostStopStartedMs = millis();
+        }
+        return;
+    }
+
+    if(millis() - m_PostStopStartedMs >= POST_STOP_CAPTURE_MS)
+    {
         m_rFsm.RequestTransition(StateId::ProcessingState);
     }
 }
@@ -132,8 +151,8 @@ void RecordingState::UpdateDirection()
     switch(m_Direction)
     {
     case MotionDirection::GoingUp:
-        // Serial.println("up.");
-        if(m_CurrVelocityZ < kUpThreshold - kHysteresis)
+        Serial.println(m_CurrVelocityZ);
+        if(m_CurrVelocityZ < kEndOfMotionVelocity)
         {
             m_Direction = MotionDirection::NearZero;
         }

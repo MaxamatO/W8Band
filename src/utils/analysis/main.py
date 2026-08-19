@@ -1,209 +1,245 @@
-"""
-Offline pipeline do analizy pojedynczego powtorzenia zarejestrowanego
-przez W8Band. Wklej surowy CSV z DumpRawDataToSerial() i uruchom.
+"""Rekonstrukcja względnej trajektorii sztangi z jednego powtórzenia IMU.
 
-Kolumny CSV: seq,timestamp_ms,qw,qx,qy,qz,ax,ay,az,gvx,gvy,gvz
-(qw..qz to surowe int16 Q1.14; ax,ay,az i gvx,gvy,gvz to surowe int16 mg)
+Wymagania:
+    pip install numpy pandas scipy matplotlib
 
-Wyjscie: pelna trajektoria 3D w ukladzie swiata (X,Y,Z), zwizualizowana jako
-dwa rzuty 2D (X-Z i Y-Z) - jeden z nich powinien pokazac naturalny luk ruchu
-sztangi (plaszczyzna strzalkowa), drugi powinien zostac plaski blisko zera
-(drift boczny). Bez magnetometru nie da sie z gory okreslic ktory to ktory -
-ocen to wizualnie po ksztalcie.
+Założenie: plik zawiera pełne pojedyncze powtórzenie wraz z ok. 0.2 s
+bezruchu przed i po ruchu. Wynik jest trajektorią *względną*; nie jest
+absolutnym pomiarem pozycji w pomieszczeniu.
 """
 
+from pathlib import Path
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.signal import butter, filtfilt
-import matplotlib.pyplot as plt
+from scipy.integrate import cumulative_trapezoid
+from scipy.signal import butter, sosfiltfilt
+from scipy.spatial.transform import Rotation
 
-# ---------------------------------------------------------------------------
-# Konfiguracja - dopasuj do swoich zmierzonych wartosci
-# ---------------------------------------------------------------------------
-CSV_PATH = "dataset.csv"
-ACCEL_BIAS_MG = np.array([0.0, 0.0, 0.0])  # wklej m_AccelBias z sesji nagrania
-Q14_SCALE = 16384.0
-MG_TO_MS2 = 9.80665 / 1000.0
+
+# --- Konfiguracja -----------------------------------------------------------
+CSV_PATH = Path("dataset2.csv")
+OUTPUT_PNG = Path("barbell_trajectory.png")
+
+# W pokazanej próbce ostatnia liczba ma wartość prawie 1, więc najpewniej jest
+# skalarne w. Ustaw "wxyz" tylko gdy firmware zapisuje kolejno w,x,y,z.
+LOGGED_QUATERNION_ORDER = "wxyz"
+QUATERNION_SCALE = 16384.0       # 1.0, gdy do CSV zapisujesz już floaty
+
+# True, jeśli q obraca wektor z układu czujnika do układu świata. Jeżeli
+# kontrola "std(g_w)" na dole daje duże wartości, zmień na False.
+QUATERNION_IS_BODY_TO_WORLD = True
+
+# Wszystkie trzy grupy muszą mieć te same jednostki fizyczne. Dla Twojej
+# próbki ax~995 i gvz~994, czyli są już w mg. bias* też musi być w mg.
+ACC_AND_GRAVITY_ARE_MG = True
 LOWPASS_CUTOFF_HZ = 10.0
-SAMPLE_RATE_HZ = 120.0
+TURNAROUND_HALF_WINDOW_S = 0.1
 
 
-def rotate_body_to_world(qw, qx, qy, qz, vx, vy, vz):
-    """Ten sam wzor co RotateBodyToWorld w C++ - wektoryzowany po calej serii."""
-    cx = qy * vz - qz * vy
-    cy = qz * vx - qx * vz
-    cz = qx * vy - qy * vx
-
-    ccx = qy * cz - qz * cy
-    ccy = qz * cx - qx * cz
-    ccz = qx * cy - qy * cx
-
-    out_x = vx + 2.0 * qw * cx + 2.0 * ccx
-    out_y = vy + 2.0 * qw * cy + 2.0 * ccy
-    out_z = vz + 2.0 * qw * cz + 2.0 * ccz
-    return out_x, out_y, out_z
+def unit(v: np.ndarray) -> np.ndarray:
+    n = np.linalg.norm(v)
+    if n == 0:
+        raise ValueError("Nie można znormalizować wektora zerowego.")
+    return v / n
 
 
-def linear_detrend(v, i_start, i_end):
-    """Wymusza v[i_start]=0 i v[i_end]=0 przez odjecie liniowej rampy.
-    Dziala na widoku v[i_start:i_end+1] w miejscu, nic nie zwraca."""
-    n = i_end - i_start
-    if n <= 0:
-        return
-    segment = v[i_start:i_end + 1]
-    ramp = np.linspace(segment[0], segment[-1], n + 1)
-    v[i_start:i_end + 1] = segment - ramp
+def read_and_uniformize(df: pd.DataFrame):
+    """Zamienia timestamp hosta (kwantyzowany w ms) na równą siatkę czasu.
+
+    Gdy timestamp pochodzi z FIFO sensora i jest dokładny, usuń tę funkcję
+    oraz użyj t_raw bezpośrednio. Dla timestampu nRF z pokazanej próbki
+    (odstępy 8/9 ms) ta operacja usuwa wyłącznie jitter zapisu.
+    """
+    t_raw = df.timestamp_ms.to_numpy(dtype=float) * 1e-3
+    if len(t_raw) < 20:
+        raise ValueError("Potrzeba co najmniej 20 próbek (pełnego powtórzenia).")
+    dts = np.diff(t_raw)
+    if np.any(dts <= 0):
+        raise ValueError("timestamp_ms musi rosnąć ściśle.")
+    dt = (t_raw[-1] - t_raw[0]) / (len(t_raw) - 1)
+    if np.max(dts) > 1.5 * dt:
+        raise ValueError(
+            "Wykryto brakujące próbki. Nie interpoluj ich w ciemno; "
+            "zapisuj timestamp z FIFO albo uzupełnij brakujące próbki."
+        )
+    t = t_raw[0] + np.arange(len(t_raw)) * dt
+    return t_raw, t, dt
 
 
-def integrate_trapezoidal(values, dt, start_value=0.0):
-    out = np.empty(len(values))
-    out[0] = start_value
-    for i in range(1, len(values)):
-        out[i] = out[i - 1] + (values[i - 1] + values[i]) * 0.5 * dt[i - 1]
-    return out
+def logged_quaternion_to_xyzw(df: pd.DataFrame) -> np.ndarray:
+    """Zwraca znormalizowane [x,y,z,w], format oczekiwany przez SciPy."""
+    if sorted(LOGGED_QUATERNION_ORDER) != sorted("xyzw"):
+        raise ValueError("LOGGED_QUATERNION_ORDER musi być permutacją 'xyzw'.")
+    q_logged = df[["qw", "qx", "qy", "qz"]].to_numpy(float) / QUATERNION_SCALE
+    index = {letter: i for i, letter in enumerate(LOGGED_QUATERNION_ORDER)}
+    q = q_logged[:, [index["w"], index["x"], index["y"], index["z"]]]
+
+    # q i -q oznaczają tę samą orientację. Ujednolicenie znaku jest konieczne
+    # przed interpolacją do równych chwil czasu.
+    for i in range(1, len(q)):
+        if np.dot(q[i - 1], q[i]) < 0:
+            q[i] *= -1
+    norms = np.linalg.norm(q, axis=1)
+    if np.any(norms < 0.5):
+        raise ValueError("Kwaternion ma nieprawidłową normę; sprawdź dekodowanie SFLP.")
+    return q / norms[:, None]
 
 
-def process_axis(world_accel_mg, dt, turnaround_idx, cutoff_hz, fs_hz):
-    """Filtr -> calkowanie -> korekcja ZUPT dwuodcinkowa (start/turnaround/
-    koniec) -> pozycja. Ten sam pipeline dla kazdej z trzech osi swiata."""
-    b, a = butter(2, cutoff_hz, fs=fs_hz, btype="low")
-    filt_mg = filtfilt(b, a, world_accel_mg)
-    accel_ms2 = filt_mg * MG_TO_MS2
-
-    v_raw = integrate_trapezoidal(accel_ms2, dt)
-    v_corrected = v_raw.copy()
-    linear_detrend(v_corrected, 0, turnaround_idx)
-    linear_detrend(v_corrected, turnaround_idx, len(v_corrected) - 1)
-
-    position = integrate_trapezoidal(v_corrected, dt)
-    return v_corrected, position
+def interpolate_columns(t_raw, t, values):
+    values = np.asarray(values, dtype=float)
+    if values.ndim == 1:
+        return np.interp(t, t_raw, values)
+    return np.column_stack([np.interp(t, t_raw, values[:, j]) for j in range(values.shape[1])])
 
 
-# ---------------------------------------------------------------------------
-# 1. Wczytanie i dekodowanie
-# ---------------------------------------------------------------------------
-df = pd.read_csv(CSV_PATH)
+def rotate_body_to_world(rotation: Rotation, vectors_body: np.ndarray) -> np.ndarray:
+    if QUATERNION_IS_BODY_TO_WORLD:
+        return rotation.apply(vectors_body)
+    return rotation.inv().apply(vectors_body)
 
-qw = df.qw / Q14_SCALE
-qx = df.qx / Q14_SCALE
-qy = df.qy / Q14_SCALE
-qz = df.qz / Q14_SCALE
 
-t_s = ((df.timestamp_ms - df.timestamp_ms.iloc[0]) / 1000.0).values
-dt = np.diff(t_s)
+def integrate(a: np.ndarray, t: np.ndarray) -> np.ndarray:
+    return cumulative_trapezoid(a, t, axis=0, initial=0.0)
 
-# ---------------------------------------------------------------------------
-# 2. Odjecie bias + grawitacji - w body frame, przed rotacja (gv[] traktowane
-#    jako zweryfikowane/zaufane, zgodnie z ustaleniem)
-# ---------------------------------------------------------------------------
-lin_ax = (df.ax - ACCEL_BIAS_MG[0] - df.gvx).values
-lin_ay = (df.ay - ACCEL_BIAS_MG[1] - df.gvy).values
-lin_az = (df.az - ACCEL_BIAS_MG[2] - df.gvz).values
+ 
+def integrate_with_zero_velocity_anchors(a, t, anchors):
+    """Całkuje a->v i odejmuje najmniejszy liniowy dryft spełniający v=0.
 
-plt.figure()
-plt.plot(t_s, lin_az)
-plt.title("linAz - body frame, po odjeciu bias+grawitacji, PRZED rotacja")
-plt.xlabel("t [s]"); plt.ylabel("mg"); plt.show()
+    To ZUPT z kotwicami, a nie sztuczne zerowanie pozycji. Pozycja i prędkość
+    są ciągłe; zmieniana jest tylko stała składowa przyspieszenia w segmentach.
+    """
+    anchors = np.unique(np.asarray(anchors, dtype=int))
+    v_raw = integrate(a, t)
+    correction = np.interp(t, t[anchors], v_raw[anchors])
+    return v_raw - correction
 
-# ---------------------------------------------------------------------------
-# 3. Rotacja do world frame - wszystkie trzy osie
-# ---------------------------------------------------------------------------
-world_ax, world_ay, world_az = rotate_body_to_world(
-    qw.values, qx.values, qy.values, qz.values, lin_ax, lin_ay, lin_az)
 
-plt.figure()
-plt.plot(t_s, world_az)
-plt.title("worldAz - po rotacji do ukladu swiata")
-plt.xlabel("t [s]"); plt.ylabel("mg"); plt.show()
+def horizontal_basis(e_up: np.ndarray) -> np.ndarray:
+    """Tworzy arbitralne, lecz stabilne osie poziome oraz oś pionową e_up."""
+    reference = np.array([1.0, 0.0, 0.0])
+    if abs(np.dot(reference, e_up)) > 0.9:
+        reference = np.array([0.0, 1.0, 0.0])
+    e_x = unit(reference - np.dot(reference, e_up) * e_up)
+    e_y = unit(np.cross(e_up, e_x))
+    return np.column_stack((e_x, e_y, e_up))
 
-# ---------------------------------------------------------------------------
-# 4. Wstepne calkowanie samej osi Z (bez ZUPT) - do znalezienia TURNAROUND.
-#    Turnaround to z natury pojecie pionowe (najnizszy punkt ruchu), wiec
-#    lokalizujemy go wylacznie na podstawie Z, niezaleznie od tego ktora
-#    poplioma os pozniej okaze sie "strzalkowa".
-# ---------------------------------------------------------------------------
-b0, a0 = butter(2, LOWPASS_CUTOFF_HZ, fs=SAMPLE_RATE_HZ, btype="low")
-world_az_filt = filtfilt(b0, a0, world_az) * MG_TO_MS2
-v_raw_z = integrate_trapezoidal(world_az_filt, dt)
 
-plt.figure()
-plt.plot(t_s, v_raw_z)
-plt.title("Predkosc Z PRZED ZUPT (widac dryft)")
-plt.xlabel("t [s]"); plt.ylabel("m/s"); plt.show()
+def dominant_horizontal_coordinate(position_xyz: np.ndarray) -> np.ndarray:
+    """Wybiera główny poziomy kierunek ruchu (rzut strzałkowy/J-curve)."""
+    horizontal = position_xyz[:, :2] - position_xyz[0, :2]
+    _, _, vt = np.linalg.svd(horizontal - horizontal.mean(axis=0), full_matrices=False)
+    direction = vt[0]
+    h = horizontal @ direction
+    # Znak jest umowny; przyjmujemy, że koniec powtórzenia ma dodatni kierunek.
+    return h if h[-1] >= 0 else -h
 
-v_prelim = v_raw_z.copy()
-linear_detrend(v_prelim, 0, len(v_prelim) - 1)
-pos_prelim = integrate_trapezoidal(v_prelim, dt)
 
-margin = max(1, len(pos_prelim) // 20)
-search_slice = slice(margin, len(pos_prelim) - margin)
-turnaround_idx = margin + int(np.argmin(pos_prelim[search_slice]))
+def plot_trajectory(t, position, velocity, turnaround_idx):
+    h = dominant_horizontal_coordinate(position)
+    z = position[:, 2] - position[0, 2]
+    half = max(1, int(round(TURNAROUND_HALF_WINDOW_S / np.median(np.diff(t)))))
+    i0 = max(0, turnaround_idx - half)
+    i1 = min(len(t) - 1, turnaround_idx + half)
 
-plt.figure()
-plt.plot(t_s, pos_prelim)
-plt.axvline(t_s[turnaround_idx], color="r", linestyle="--",
-           label=f"TURNAROUND @ {t_s[turnaround_idx]:.3f}s")
-plt.legend(); plt.title("Pozycja Z (wstepna) - lokalizacja TURNAROUND")
-plt.xlabel("t [s]"); plt.ylabel("m"); plt.show()
+    fig = plt.figure(figsize=(13, 5.6), constrained_layout=True)
+    ax = fig.add_subplot(1, 2, 1)
+    ax3 = fig.add_subplot(1, 2, 2, projection="3d")
 
-# ---------------------------------------------------------------------------
-# 5. Wlasciwe przetworzenie WSZYSTKICH trzech osi, z korekcja ZUPT
-#    kotwiczona na start/TURNAROUND/koniec
-# ---------------------------------------------------------------------------
-v_x, pos_x = process_axis(world_ax, dt, turnaround_idx, LOWPASS_CUTOFF_HZ, SAMPLE_RATE_HZ)
-v_y, pos_y = process_axis(world_ay, dt, turnaround_idx, LOWPASS_CUTOFF_HZ, SAMPLE_RATE_HZ)
-v_z, pos_z = process_axis(world_az, dt, turnaround_idx, LOWPASS_CUTOFF_HZ, SAMPLE_RATE_HZ)
+    # Fazy: opuszczanie, krótka okolica punktu zwrotnego, wyciskanie.
+    phases = [(0, i0, "Opuszczanie", "#1f77b4"),
+              (i0, i1, "Punkt zwrotny", "#d62728"),
+              (i1, len(t) - 1, "Wyciskanie", "#2ca02c")]
+    for begin, end, name, color in phases:
+        sl = slice(begin, end + 1)
+        ax.plot(h[sl] * 100, z[sl] * 100, color=color, lw=2.5, label=name)
+        ax3.plot(position[sl, 0] * 100, position[sl, 1] * 100,
+                 position[sl, 2] * 100, color=color, lw=2.5, label=name)
 
-plt.figure()
-plt.plot(t_s, v_z, label="Vz")
-plt.axvline(t_s[turnaround_idx], color="r", linestyle="--")
-plt.legend(); plt.title("Predkosc Z PO korekcji ZUPT (2 odcinki)")
-plt.xlabel("t [s]"); plt.ylabel("m/s"); plt.show()
-
-# ---------------------------------------------------------------------------
-# 6. Trajektoria 2D - dwa rzuty, kolor = czas, znaczniki start/turnaround/koniec
-# ---------------------------------------------------------------------------
-def plot_2d_trajectory(ax, pos_h, pos_z, t_s, turnaround_idx, h_label):
-    pos_h_cm = pos_h * 100.0
-    pos_z_cm = pos_z * 100.0
-
-    sc = ax.scatter(pos_h_cm, pos_z_cm, c=t_s, cmap="viridis", s=12, zorder=2)
-    ax.plot(pos_h_cm, pos_z_cm, color="gray", alpha=0.3, linewidth=1, zorder=1)
-
-    ax.scatter(pos_h_cm[0], pos_z_cm[0], color="green", s=100,
-              marker="o", label="Start", zorder=3)
-    ax.scatter(pos_h_cm[turnaround_idx], pos_z_cm[turnaround_idx],
-              color="red", s=100, marker="X", label="Turnaround", zorder=3)
-    ax.scatter(pos_h_cm[-1], pos_z_cm[-1], color="blue", s=100,
-              marker="s", label="Koniec", zorder=3)
-
-    ax.set_xlabel(f"{h_label} [cm]")
-    ax.set_ylabel("Z (pion) [cm]")
-    ax.set_title(f"Trajektoria - rzut {h_label}-Z")
-    ax.set_aspect("equal", adjustable="box")
-    ax.legend()
+    ax.scatter(h[[0, turnaround_idx, -1]] * 100, z[[0, turnaround_idx, -1]] * 100,
+               c=["black", "#d62728", "black"], s=[40, 80, 40], zorder=3)
+    ax.annotate("start", (h[0] * 100, z[0] * 100), xytext=(5, 5), textcoords="offset points")
+    ax.annotate("klatka", (h[turnaround_idx] * 100, z[turnaround_idx] * 100),
+                xytext=(5, -15), textcoords="offset points")
+    ax.annotate("koniec", (h[-1] * 100, z[-1] * 100), xytext=(5, 5), textcoords="offset points")
+    ax.axhline(0, color="0.7", lw=0.8)
+    ax.set(title="Trajektoria w płaszczyźnie głównego ruchu", xlabel="poziomo (kierunek PCA) [cm]",
+           ylabel="pion, Z↑ [cm]")
+    ax.set_aspect("equal", adjustable="datalim")
     ax.grid(alpha=0.3)
-    return sc
+    ax.legend()
+
+    ax3.set(title="Trajektoria 3D w układzie świata IMU", xlabel="X [cm]", ylabel="Y [cm]", zlabel="Z↑ [cm]")
+    ax3.legend()
+    plt.savefig(OUTPUT_PNG, dpi=180, bbox_inches="tight")
+    plt.show()
+
+    print(f"Punkt zwrotny: {t[turnaround_idx] - t[0]:.3f} s")
+    print(f"ROM pionowy: {(z.max() - z.min()) * 100:.1f} cm")
+    print(f"Maks. prędkość w górę: {velocity[turnaround_idx:, 2].max():.3f} m/s")
+    print(f"Wykres zapisano: {OUTPUT_PNG.resolve()}")
 
 
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-sc1 = plot_2d_trajectory(ax1, pos_x, pos_z, t_s, turnaround_idx, "X")
-sc2 = plot_2d_trajectory(ax2, pos_y, pos_z, t_s, turnaround_idx, "Y")
-fig.colorbar(sc2, ax=ax2, label="t [s]")
-fig.suptitle("Trajektoria 2D urzadzenia - oba rzuty poziome vs pion\n"
-            "(ktory pokazuje naturalny luk = plaszczyzna strzalkowa, "
-            "ktory zostaje plaski = drift boczny - ocen wizualnie)")
-plt.tight_layout()
-plt.show()
+def main():
+    df = pd.read_csv(CSV_PATH)
+    required = {"timestamp_ms", "qw", "qx", "qy", "qz", "ax", "ay", "az",
+                "gvx", "gvy", "gvz", "biasx", "biasy", "biasz"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Brak kolumn: {sorted(missing)}")
+    if not ACC_AND_GRAVITY_ARE_MG:
+        raise ValueError("Najpierw przelicz ax/ay/az i gv* do wspólnych jednostek mg.")
 
-# ---------------------------------------------------------------------------
-# Podsumowanie liczbowe
-# ---------------------------------------------------------------------------
-print(f"\nTURNAROUND w probce {turnaround_idx} / {len(df)} "
-      f"(t={t_s[turnaround_idx]:.3f}s)")
-print(f"Peak predkosc koncentryki (Z): {v_z[turnaround_idx:].max():.3f} m/s")
-print(f"Zakres pozycji pionowej (ROM): {(pos_z.max() - pos_z.min())*100:.2f} cm")
-print(f"Zakres X (amplituda pozioma): {(pos_x.max() - pos_x.min())*100:.2f} cm")
-print(f"Zakres Y (amplituda pozioma): {(pos_y.max() - pos_y.min())*100:.2f} cm")
-print("Wieksza amplituda pozioma z X/Y to prawdopodobnie plaszczyzna "
-      "strzalkowa (naturalny luk ruchu); mniejsza to drift boczny.")
+    t_raw, t, dt = read_and_uniformize(df)
+    fs = 1.0 / dt
+    if not 0 < LOWPASS_CUTOFF_HZ < fs / 2:
+        raise ValueError("LOWPASS_CUTOFF_HZ musi być w zakresie (0, Nyquist).")
+
+    q_raw = logged_quaternion_to_xyzw(df)
+    q = interpolate_columns(t_raw, t, q_raw)
+    q /= np.linalg.norm(q, axis=1, keepdims=True)
+    rotation = Rotation.from_quat(q)
+
+    acc_mg = interpolate_columns(t_raw, t, df[["ax", "ay", "az"]].to_numpy())
+    gravity_mg = interpolate_columns(t_raw, t, df[["gvx", "gvy", "gvz"]].to_numpy())
+    acc_bias_mg = interpolate_columns(t_raw, t, df[["biasx", "biasy", "biasz"]].to_numpy())
+
+    # bias* jest tu offsetem AKCELEROMETRU wyrażonym w mg. Nie podawaj w tych
+    # kolumnach biasu żyroskopu SFLP (ma jednostki mdps i nie odejmuje się go od a).
+    linear_body_mg = acc_mg - acc_bias_mg - gravity_mg
+    linear_world_mg = rotate_body_to_world(rotation, linear_body_mg)
+    gravity_world_mg = rotate_body_to_world(rotation, gravity_mg)
+
+    # Dla właściwej konwencji kwaternionu ten wektor jest prawie stały w świecie.
+    print("fs = %.2f Hz; std(R·GV) [mg] = %s" %
+          (fs, np.array2string(np.std(gravity_world_mg, axis=0), precision=1)))
+
+    sos = butter(2, LOWPASS_CUTOFF_HZ, btype="low", fs=fs, output="sos")
+    acceleration_world = sosfiltfilt(sos, linear_world_mg, axis=0) * 9.80665 / 1000.0
+
+    # Oś Z powstaje z mediany world-GV; w spoczynku Twój acc i GV są zgodne,
+    # więc wskazuje ona "górę" w konwencji przyspieszeniomierza.
+    e_up = unit(np.median(gravity_world_mg, axis=0))
+    basis = horizontal_basis(e_up)
+    acceleration = acceleration_world @ basis
+
+    # Wstępna pozycja służy wyłącznie do lokalizacji minimum (sztanga na klatce).
+    v_pre = integrate_with_zero_velocity_anchors(acceleration[:, 2], t, [0, len(t) - 1])
+    z_pre = integrate(v_pre, t)
+    margin = max(3, int(0.05 * len(t)))
+    turnaround_idx = margin + np.argmin(z_pre[margin:-margin])
+
+    # ZUPT: na pionie v=0 także w punkcie zwrotnym. W poziomie kotwice są
+    # tylko na początku i końcu, bo w najniższym punkcie bar może wciąż iść w bok.
+    velocity = np.empty_like(acceleration)
+    for axis in (0, 1):
+        velocity[:, axis] = integrate_with_zero_velocity_anchors(acceleration[:, axis], t, [0, len(t) - 1])
+    velocity[:, 2] = integrate_with_zero_velocity_anchors(acceleration[:, 2], t,
+                                                           [0, turnaround_idx, len(t) - 1])
+    position = integrate(velocity, t)
+    plot_trajectory(t, position, velocity, turnaround_idx)
+
+
+if __name__ == "__main__":
+    main()

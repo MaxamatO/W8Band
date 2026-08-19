@@ -11,6 +11,8 @@ W8BandLauncher::W8BandLauncher()
 bool W8BandLauncher::Initialize()
 {
     m_ErrorMessage = "";
+    Serial.println("dupa");
+    Serial.flush();
     pinMode(WAKEUP_INT1, INPUT_PULLDOWN);
     if(!m_Lsm.InitLsm())
     {

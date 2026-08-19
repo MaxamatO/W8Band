@@ -52,7 +52,7 @@ public:
         float accelVar
             = (m_SumSqAccel / n) - ((m_SumAccel / n) * (m_SumAccel / n));
         float gyroVar = (m_SumSqGyro / n) - ((m_SumGyro / n) * (m_SumGyro / n));
-        return accelVar < accelValThresh && gyroVar < gyroValThresh;
+        return accelVar < accelValThresh;
     }
 
     float GetVarAccel()

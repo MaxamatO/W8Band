@@ -8,8 +8,8 @@ namespace w8band::StateMachine
 namespace
 {
 // Threshold for determining stillness.
-constexpr float STILLNESS_ACCEL_VAR_THS = 60.0f;
-constexpr float GYRO_VAR_THS = 15.0f;
+constexpr float STILLNESS_ACCEL_VAR_THS = 120.0f;
+constexpr float GYRO_VAR_THS = 30.0f;
 }
 CalibrationState::CalibrationState(DataContext &rDataCtx, W8BandFsm &rFsm)
     : fsm::IState<DataContext, StateId>(rDataCtx), m_rFsm(rFsm)
@@ -18,6 +18,9 @@ CalibrationState::CalibrationState(DataContext &rDataCtx, W8BandFsm &rFsm)
 void CalibrationState::OnEnter()
 {
     m_rContext.m_rLsmServiceManager.ResetFIFO();
+    m_Window.Reset();
+    m_BiasAccumulator.Reset();
+    m_rContext.m_CalibrationValid = false;
     m_DiscardCount = SAMPLES_TO_DISCARD;
     m_Phase = CalibrationPhase::WaitingForStillness;
     m_StartedAtMs = millis();
@@ -98,20 +101,14 @@ void CalibrationState::StillnessWaitHandler(data::SamplePacket &rPacket)
     float gyroMag;
     DataContext::CalculateMagnitude(rPacket, accelMag, gyroMag);
     m_Window.Push(accelMag, gyroMag);
-    if(m_Window.isStill(STILLNESS_ACCEL_VAR_THS, GYRO_VAR_THS))
+    if(!m_Window.isStill(STILLNESS_ACCEL_VAR_THS, GYRO_VAR_THS))
     {
-        Serial.println("Still");
-        m_Phase = CalibrationPhase::Accumulating;
         return;
     }
 
+    m_BiasAccumulator.Reset();
     m_BiasAccumulator.Add(rPacket);
-
-    if(m_BiasAccumulator.IsFull(CALIBRATION_DATA_COUNT))
-    {
-        m_Phase = CalibrationPhase::Done;
-        return;
-    }
+    m_Phase = CalibrationPhase::Accumulating;
 }
 
 void CalibrationState::CalibratingErrorHandler()

@@ -15,7 +15,7 @@
     101/110/111 - 250 mg/LSB
     so in our case REAL_THS_MG = 20 * 001
 */
-#define WU_THS 10
+#define WU_THS 6
 
 #define TAG_GAME_ROTATION_VECTOR 0x13u
 #define TAG_GRAVITY_VECTOR 0x17u
@@ -49,9 +49,11 @@ LsmServiceManager::LsmServiceManager(TwoWire &rWire, uint8_t i2cAddress)
 
 bool LsmServiceManager::InitLsm()
 {
+    Serial.println("dupa2");
     uint8_t status = 0;
 
     status |= m_Imu.begin();
+    Serial.println("dupa3");
     status |= m_Imu.Device_Reset();
     delay(50);
 
@@ -80,7 +82,6 @@ bool LsmServiceManager::InitLsm()
     delay(20);
     status |= m_Imu.Set_SFLP_Batch(true, true, false);
     Serial.println("after gvec 2");
-    Serial.flush();
     delay(10);
     status |= m_Imu.FIFO_Set_X_BDR(IMU_FREQ);
     status |= m_Imu.FIFO_Set_Mode(LSM6DSV16X_STREAM_MODE);
@@ -107,11 +108,17 @@ bool LsmServiceManager::InitWakeup(uint8_t &rStatus)
     tapCfg0 |= (1 << 4);
     m_Imu.Write_Reg(LSM6DSV16X_TAP_CFG0, tapCfg0);
 
+    // Enable Hihh pass filter again...
+    // uint8_t ctrl9Reg = 0;
+    // m_Imu.Read_Reg(LSM6DSV16X_CTRL9, &ctrl9Reg);
+    // ctrl9Reg |= (1 << 4); // HP_SLOPE_XL_EN = 1
+    // m_Imu.Write_Reg(LSM6DSV16X_CTRL9, ctrl9Reg);
+
     // Set rosolution
     uint8_t inactDurReg = 0;
     m_Imu.Read_Reg(LSM6DSV16X_INACTIVITY_DUR, &inactDurReg);
 
-    inactDurReg |= (0b001 << 4);
+    inactDurReg |= (0b010 << 4);
     m_Imu.Write_Reg(LSM6DSV16X_INACTIVITY_DUR, inactDurReg);
 
     m_Imu.Set_Wake_Up_Threshold(WU_THS);
@@ -183,18 +190,18 @@ bool LsmServiceManager::ObtainData(data::SamplePacket &rPacketOut)
         {
             elapsedTime = millis() - startTime;
 
-            rPacketOut.q[0] = toQ14(m_LatestQuat[0]);
-            rPacketOut.q[1] = toQ14(m_LatestQuat[1]);
-            rPacketOut.q[2] = toQ14(m_LatestQuat[2]);
-            rPacketOut.q[3] = toQ14(m_LatestQuat[3]);
+            rPacketOut.q[0] = toQ14(m_LatestQuat[3]); // W
+            rPacketOut.q[1] = toQ14(m_LatestQuat[0]); // X
+            rPacketOut.q[2] = toQ14(m_LatestQuat[1]); // Y
+            rPacketOut.q[3] = toQ14(m_LatestQuat[2]); // Z
 
-            rPacketOut.a[0] = (int16_t)m_LatestAccel[0];
-            rPacketOut.a[1] = (int16_t)m_LatestAccel[1];
-            rPacketOut.a[2] = (int16_t)m_LatestAccel[2];
+            rPacketOut.a[0] = (int16_t)m_LatestAccel[0]; // X
+            rPacketOut.a[1] = (int16_t)m_LatestAccel[1]; // Y
+            rPacketOut.a[2] = (int16_t)m_LatestAccel[2]; // Z
 
-            rPacketOut.gv[0] = (int16_t)m_LatestGravityVector[0];
-            rPacketOut.gv[1] = (int16_t)m_LatestGravityVector[1];
-            rPacketOut.gv[2] = (int16_t)m_LatestGravityVector[2];
+            rPacketOut.gv[0] = (int16_t)m_LatestGravityVector[0]; // X
+            rPacketOut.gv[1] = (int16_t)m_LatestGravityVector[1]; // Y
+            rPacketOut.gv[2] = (int16_t)m_LatestGravityVector[2]; // Z
 
             rPacketOut.timestamp_ms = millis();
             m_HaveFreshAccel = false;

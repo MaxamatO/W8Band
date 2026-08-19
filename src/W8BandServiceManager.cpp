@@ -1,4 +1,5 @@
 #include "W8BandServiceManager.hpp"
+#include "DataTypes.hpp"
 #include <Arduino.h>
 
 namespace w8band
@@ -42,9 +43,21 @@ void W8BandServiceManager::StartApplication() {}
 
 void W8BandServiceManager::Update()
 {
+    // data::SamplePacket packet;
+    // if(m_rLsmServiceManager.ObtainData(packet))
+    // {
+    //     Serial.print(packet.a[0]);
+    //     Serial.print(", ");
+    //     Serial.print(packet.a[1]);
+    //     Serial.print(", ");
+    //     Serial.println(packet.a[2]);
+    //     if(v_WakeUpDetected)
+    //     {
+    //         v_WakeUpDetected = false;
+    //     }
+    // }
     if(v_WakeUpDetected)
     {
-        // Serial.println(ISRcount);
         m_rDataContext.m_LiftOffDetected = true;
         v_WakeUpDetected = false;
     }
@@ -52,10 +65,11 @@ void W8BandServiceManager::Update()
 }
 
 void W8BandServiceManager::AttachWakeUptInterrupt(uint16_t interruptPin)
+{ attachInterrupt(digitalPinToInterrupt(interruptPin), WakeUpISR1, RISING); }
+
+void W8BandServiceManager::WakeUpISR1()
 {
-    attachInterrupt(digitalPinToInterrupt(interruptPin), WakeUpISR1, RISING);
+    v_WakeUpDetected = true;
     ISRcount += 1;
 }
-
-void W8BandServiceManager::WakeUpISR1() { v_WakeUpDetected = true; }
 } // namespace w8band
