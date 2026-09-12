@@ -11,7 +11,9 @@ namespace w8band::Hardware
 class LsmServiceManager
 {
 public:
-    /// @brief Default constructor
+    /// @brief Constructs an LSM6DSV16X service on the selected I2C bus.
+    /// @param[in,out] rWire I2C bus used to communicate with the sensor.
+    /// @param[in] i2cAddress LSM6DSV16X I2C address.
     LsmServiceManager(TwoWire &rWire, uint8_t i2cAddress = IMU_I2C_ADDRESS);
 
     /// @brief Initialize LSM6DSV16X, calls InitWakeup() at the end.
@@ -23,7 +25,8 @@ public:
     /// @param[out] rPacketOut Struct passed by reference for storing loaded
     /// data. For more infromation about struct @see SamplePacket in
     /// DataTypes.hpp
-    /// @return True if obtained data consists of 3 elements - q, a, gv. False if no TAG found
+    /// @return True if obtained data consists of q, a, gv and a sensor
+    /// timestamp. False if a complete frame is not available yet.
     bool ObtainData(data::SamplePacket &rPacketOut);
 
     /// @brief Method used to fill provided buffer data for calibration.
@@ -38,8 +41,8 @@ private:
     LSM6DSV16XSensor m_Imu;
 
     /// @brief Initialize LSM wakeup interrupt detection.
-    /// @param[in] rStatus status passed by InitLsm to check for correct
-    /// initialization.
+    /// @param[in,out] rStatus Accumulated initialization status updated with
+    /// wake-up configuration results.
     /// @return True if initalization was correct, false otherwise.
     bool InitWakeup(uint8_t &rStatus);
 
@@ -58,6 +61,9 @@ private:
     /// @brief Latest gravity vector data obtained from LSM6DSV16X
     float m_LatestGravityVector[3] = {};
 
+    /// @brief Latest raw timestamp obtained from the sensor FIFO.
+    uint32_t m_LatestTimestampTicks = 0;
+
     /// @brief Indicator if obtained quaternions are recent
     bool m_HaveFreshQuat = false;
 
@@ -66,6 +72,9 @@ private:
 
     /// @brief Indicator if obtained Gravity Vector values are recent
     bool m_HaveFreshGV = false;
+
+    /// @brief Indicator if a fresh sensor timestamp is available.
+    bool m_HaveFreshTimestamp = false;
 };
 
 } // namespace w8band::lsm_service_manager

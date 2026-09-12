@@ -45,6 +45,11 @@ bool BleServiceManager::InitBle()
     // Bluefruit.Advertising.start(0);
 
     // Serial.println("BLE: OK");
+
+    // BLE is intentionally stubbed while the motion pipeline is developed.
+    // Report successful no-op initialization instead of returning an
+    // indeterminate value to W8BandLauncher::Initialize().
+    return true;
 }
 
 void BleServiceManager::SendBLEData()

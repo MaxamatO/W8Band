@@ -24,10 +24,13 @@ enum class BufferringPhase
 
 /// @brief BufferringState entered after a successful calibration. Resests m_WakeupDetected
 /// flag, keeps populating rolling buffer for PRE_ROCORD_SAMPLES amount. Waits
-/// for another m_WakeupDetected flag set for transition to ArmedState
+/// for another m_WakeupDetected flag set for transition to RecordingState.
 class BufferringState : public fsm::IState<DataContext, StateId>
 {
 public:
+    /// @brief Constructs BufferringState using shared data and its parent FSM.
+    /// @param[in,out] rDataCtx Shared acquisition and recording context.
+    /// @param[in,out] rFsm State machine used to request transitions.
     BufferringState(DataContext &rDataCtx, W8BandFsm &rFsm);
 
     /// @brief @see IState::OnEnter()
@@ -40,10 +43,12 @@ public:
     void Update() override;
 
     /// @brief @see IState::GetSateId()
+    /// @return StateId::BufferringState.
     StateId GetStateId() const override;
 
     /// @brief Human-readable name, kept separate from GetStateId() so the
     ///        FSM's internal lookups stay a cheap enum compare.
+    /// @return Bufferring state name.
     std::string GetStateName() const override;
 
 private:
@@ -51,9 +56,11 @@ private:
     void HandleWaitLiftOff();
 
     /// @brief Helper method for handling WaitStillness phase.
+    /// @param[in] rPacket Current synchronized IMU sample.
     void HandleWaitStillness(data::SamplePacket &rPacket);
 
     /// @brief Helper method for handling WaitMotion phase.
+    /// @param[in] rPacket Current synchronized IMU sample.
     void HandleWaitMotion(data::SamplePacket &rPacket);
 
     /// @brief Peephole/window struct used for determining device's stillness
@@ -65,19 +72,16 @@ private:
     /// @brief Reference to current bufferring phase
     BufferringPhase m_Phase;
 
-    /// @brief Time in ms in which lift off occurred.
-    uint32_t m_LiftOffBeganMs;
-
     /// @brief True if device has went under stillness threshold.
     bool m_InStillnessStartDwell = false;
 
-    /// @brief Time in ms since device triggerred stillness dwell.
-    uint32_t m_InStillnessTimeMs = 0;
+    /// @brief Sensor timestamp at which stillness dwell began.
+    uint32_t m_StillnessStartedTicks = 0;
 
     /// @brief True if device has went through motion threshold.
     bool m_InMotionStartDwell = false;
 
-    /// @brief Time in ms since m_InMotionStartDwell is true.
-    uint32_t m_InMotionTimeMs = 0;
+    /// @brief Sensor timestamp at which motion dwell began.
+    uint32_t m_MotionStartedTicks = 0;
 };
 }

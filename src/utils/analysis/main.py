@@ -19,23 +19,21 @@ from scipy.spatial.transform import Rotation
 
 
 # --- Konfiguracja -----------------------------------------------------------
-CSV_PATH = Path("dataset2.csv")
-OUTPUT_PNG = Path("barbell_trajectory.png")
+SCRIPT_DIR = Path(__file__).resolve().parent
+CSV_PATH = SCRIPT_DIR / "dataset3.csv"
+OUTPUT_PNG = SCRIPT_DIR / "barbell_trajectory.png"
 
-# W pokazanej próbce ostatnia liczba ma wartość prawie 1, więc najpewniej jest
-# skalarne w. Ustaw "wxyz" tylko gdy firmware zapisuje kolejno w,x,y,z.
-LOGGED_QUATERNION_ORDER = "wxyz"
+# Firmware zapisuje nazwane kolumny qw,qx,qy,qz w formacie Q1.14. SciPy
+# oczekuje kolejno x,y,z,w, dlatego kolejność jest jawna w funkcji dekodującej.
 QUATERNION_SCALE = 16384.0       # 1.0, gdy do CSV zapisujesz już floaty
-
-# True, jeśli q obraca wektor z układu czujnika do układu świata. Jeżeli
-# kontrola "std(g_w)" na dole daje duże wartości, zmień na False.
-QUATERNION_IS_BODY_TO_WORLD = True
 
 # Wszystkie trzy grupy muszą mieć te same jednostki fizyczne. Dla Twojej
 # próbki ax~995 i gvz~994, czyli są już w mg. bias* też musi być w mg.
 ACC_AND_GRAVITY_ARE_MG = True
 LOWPASS_CUTOFF_HZ = 10.0
 TURNAROUND_HALF_WINDOW_S = 0.1
+LSM_TIMESTAMP_TICK_SECONDS = 21.75e-6
+MAX_WORLD_GRAVITY_STD_MG = 20.0
 
 
 def unit(v: np.ndarray) -> np.ndarray:
@@ -45,13 +43,29 @@ def unit(v: np.ndarray) -> np.ndarray:
     return v / n
 
 
-def read_and_uniformize(df: pd.DataFrame):
-    """Zamienia timestamp hosta (kwantyzowany w ms) na równą siatkę czasu.
+def read_timebase(df: pd.DataFrame):
+    """Buduje oś czasu z ticków sensora lub starszego timestampu hosta.
 
-    Gdy timestamp pochodzi z FIFO sensora i jest dokładny, usuń tę funkcję
-    oraz użyj t_raw bezpośrednio. Dla timestampu nRF z pokazanej próbki
-    (odstępy 8/9 ms) ta operacja usuwa wyłącznie jitter zapisu.
+    Dla ticków FIFO zachowuje rzeczywiste odstępy między próbkami. Obsługuje
+    również przepełnienie 32-bitowego licznika. Stare pliki z timestamp_ms
+    pozostają obsługiwane i są wyrównywane do regularnej siatki.
     """
+    if "timestamp_ticks" in df.columns:
+        ticks = df.timestamp_ticks.to_numpy(dtype=np.uint32)
+        delta_ticks = np.diff(ticks.astype(np.int64))
+        delta_ticks[delta_ticks < 0] += 2**32
+        elapsed_ticks = np.concatenate(([0], np.cumsum(delta_ticks)))
+        t = elapsed_ticks * LSM_TIMESTAMP_TICK_SECONDS
+        dts = np.diff(t)
+        if len(t) < 20:
+            raise ValueError("Potrzeba co najmniej 20 próbek (pełnego powtórzenia).")
+        if np.any(dts <= 0):
+            raise ValueError("Timestamp FIFO musi rosnąć ściśle.")
+        dt = np.median(dts)
+        if np.max(dts) > 1.5 * dt:
+            raise ValueError("Wykryto brakujące próbki w strumieniu FIFO.")
+        return t, t, dt
+
     t_raw = df.timestamp_ms.to_numpy(dtype=float) * 1e-3
     if len(t_raw) < 20:
         raise ValueError("Potrzeba co najmniej 20 próbek (pełnego powtórzenia).")
@@ -70,11 +84,7 @@ def read_and_uniformize(df: pd.DataFrame):
 
 def logged_quaternion_to_xyzw(df: pd.DataFrame) -> np.ndarray:
     """Zwraca znormalizowane [x,y,z,w], format oczekiwany przez SciPy."""
-    if sorted(LOGGED_QUATERNION_ORDER) != sorted("xyzw"):
-        raise ValueError("LOGGED_QUATERNION_ORDER musi być permutacją 'xyzw'.")
-    q_logged = df[["qw", "qx", "qy", "qz"]].to_numpy(float) / QUATERNION_SCALE
-    index = {letter: i for i, letter in enumerate(LOGGED_QUATERNION_ORDER)}
-    q = q_logged[:, [index["w"], index["x"], index["y"], index["z"]]]
+    q = df[["qx", "qy", "qz", "qw"]].to_numpy(float) / QUATERNION_SCALE
 
     # q i -q oznaczają tę samą orientację. Ujednolicenie znaku jest konieczne
     # przed interpolacją do równych chwil czasu.
@@ -95,9 +105,8 @@ def interpolate_columns(t_raw, t, values):
 
 
 def rotate_body_to_world(rotation: Rotation, vectors_body: np.ndarray) -> np.ndarray:
-    if QUATERNION_IS_BODY_TO_WORLD:
-        return rotation.apply(vectors_body)
-    return rotation.inv().apply(vectors_body)
+    """Stosuje potwierdzoną na GV konwencję SFLP: body -> world."""
+    return rotation.apply(vectors_body)
 
 
 def integrate(a: np.ndarray, t: np.ndarray) -> np.ndarray:
@@ -183,15 +192,17 @@ def plot_trajectory(t, position, velocity, turnaround_idx):
 
 def main():
     df = pd.read_csv(CSV_PATH)
-    required = {"timestamp_ms", "qw", "qx", "qy", "qz", "ax", "ay", "az",
+    required = {"qw", "qx", "qy", "qz", "ax", "ay", "az",
                 "gvx", "gvy", "gvz", "biasx", "biasy", "biasz"}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Brak kolumn: {sorted(missing)}")
+    if not {"timestamp_ticks", "timestamp_ms"} & set(df.columns):
+        raise ValueError("Brak kolumny timestamp_ticks lub timestamp_ms.")
     if not ACC_AND_GRAVITY_ARE_MG:
         raise ValueError("Najpierw przelicz ax/ay/az i gv* do wspólnych jednostek mg.")
 
-    t_raw, t, dt = read_and_uniformize(df)
+    t_raw, t, dt = read_timebase(df)
     fs = 1.0 / dt
     if not 0 < LOWPASS_CUTOFF_HZ < fs / 2:
         raise ValueError("LOWPASS_CUTOFF_HZ musi być w zakresie (0, Nyquist).")
@@ -211,9 +222,17 @@ def main():
     linear_world_mg = rotate_body_to_world(rotation, linear_body_mg)
     gravity_world_mg = rotate_body_to_world(rotation, gravity_mg)
 
-    # Dla właściwej konwencji kwaternionu ten wektor jest prawie stały w świecie.
+    # Dla właściwej konwencji i synchronizacji kwaternionu ten wektor jest
+    # prawie stały w świecie. Nie generuj wiarygodnie wyglądającego wykresu,
+    # jeżeli ta podstawowa kontrola danych wejściowych nie przechodzi.
+    gravity_world_std = np.std(gravity_world_mg, axis=0)
     print("fs = %.2f Hz; std(R·GV) [mg] = %s" %
-          (fs, np.array2string(np.std(gravity_world_mg, axis=0), precision=1)))
+          (fs, np.array2string(gravity_world_std, precision=1)))
+    if np.max(gravity_world_std) > MAX_WORLD_GRAVITY_STD_MG:
+        raise ValueError(
+            "Niespójny obrót body→world: sprawdź kolejność kwaternionu, "
+            "jego kierunek oraz synchronizację rekordów FIFO."
+        )
 
     sos = butter(2, LOWPASS_CUTOFF_HZ, btype="low", fs=fs, output="sos")
     acceleration_world = sosfiltfilt(sos, linear_world_mg, axis=0) * 9.80665 / 1000.0

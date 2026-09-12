@@ -30,6 +30,9 @@ enum class CalibrationPhase
 class CalibrationState : public fsm::IState<DataContext, StateId>
 {
 public:
+    /// @brief Constructs CalibrationState using shared data and its parent FSM.
+    /// @param[in,out] rDataCtx Shared acquisition and calibration context.
+    /// @param[in,out] rFsm State machine used to request transitions.
     CalibrationState(DataContext &rDataCtx, W8BandFsm &rFsm);
 
     /// @brief @see IState::OnEnter()
@@ -42,10 +45,12 @@ public:
     void Update() override;
 
     /// @brief @see IState::GetSateId()
+    /// @return StateId::CalibrationState.
     StateId GetStateId() const override;
 
     /// @brief Human-readable name, kept separate from GetStateId() so the
     ///        FSM's internal lookups stay a cheap enum compare.
+    /// @return Calibration state name.
     std::string GetStateName() const override;
 
 private:
@@ -71,7 +76,7 @@ private:
     /// @brief Helper method for handling CalibrationPhase::WaitingForStillness
     /// Moves sliding window across obtained data in order to determine if the
     /// device is steady
-    /// @param[out] rPacket Data
+    /// @param[in] rPacket Current synchronized IMU sample.
     void StillnessWaitHandler(data::SamplePacket &rPacket);
 
     /// @brief Helper method for accumulating data for 3s in order to calculate
@@ -81,7 +86,11 @@ private:
     /// phase.
     /// @param[in] rPacket Reference to obtained data packet for storing.
     void AccumulatingHandler(data::SamplePacket &rPacket);
+
+    /// @brief Stores the calculated accelerometer bias and leaves calibration.
     void CalibrationDoneHandler();
+
+    /// @brief Invalidates calibration after a timeout or failed calibration.
     void CalibratingErrorHandler();
 };
 

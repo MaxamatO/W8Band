@@ -2,6 +2,7 @@
 #include "BleServiceManager.hpp"
 #include "DataTypes.hpp"
 #include "LsmServiceManager.hpp"
+#include "motion-processor/MotionProcessor.hpp"
 #include <memory>
 #include <vector>
 
@@ -15,6 +16,9 @@ namespace w8band
 struct DataContext
 {
 public:
+    /// @brief Constructs shared state data using hardware service managers.
+    /// @param[in,out] m_rBle BLE service manager shared by application states.
+    /// @param[in,out] m_rLsm IMU service manager shared by application states.
     DataContext(Hardware::BleServiceManager &m_rBle,
                 Hardware::LsmServiceManager &m_rLsm);
 
@@ -51,26 +55,30 @@ public:
     /// @brief True once CalibrationState has produced a bias.
     bool m_CalibrationValid = false;
 
+    /// @brief Runtime configuration used by batch motion processing.
+    Motion::ProcessingConfig m_ProcessingConfig{};
+
+    /// @brief Most recently calculated trajectory and repetition metrics.
+    Motion::ProcessingResult m_ProcessingResult{};
+
     /// @brief Helper method to populate rolling buffer to have continous data.
     /// @param[in] rPacket Reference to packet to push to buffer
     void PushToPreBuffer(data::SamplePacket &rPacket);
 
-    /// @brief Helper method for dropping all data in order from m_PreBuffer into m_Data.
+    /// @brief Appends buffered packets to m_Data in chronological order.
     void DropPreBufferToEndData();
 
-    /// @brief Helper method to calculate magniture
-    /// @param[in] rPacket Reference for data to calculate magnitude based on
-    /// @param[out] rAccelMag Output Accelerometer Magnitude
-    /// @param[out] rGyroMag Output Gyroscope Magnitude
-    static void CalculateMagnitude(data::SamplePacket &rPacket,
-                                   float &rAccelMag, float &rGyroMag);
+    /// @brief Calculates raw accelerometer-vector magnitude in mg.
+    /// @param[in] rPacket Packet containing raw accelerometer samples.
+    /// @return Euclidean acceleration magnitude in mg.
+    static float CalculateAccelMagnitude(const data::SamplePacket &rPacket);
 
-    /// @brief Helper method to calculate linear acceleration
-    /// @param[in] rPacket Reference to packet for data
-    /// @param [out] rLinAx Reference to linear x axis acceleration
-    /// @param [out] rLinAy Reference to linear y axis acceleration
-    /// @param [out] rLinAz Reference to linear z axis acceleration
-    void GetLinearAccel(data::SamplePacket &rPacket, float &rLinAx,
+    /// @brief Removes calibrated bias and SFLP gravity in the sensor frame.
+    /// @param[in] rPacket Packet containing acceleration and gravity vectors.
+    /// @param[out] rLinAx Linear X-axis acceleration in mg.
+    /// @param[out] rLinAy Linear Y-axis acceleration in mg.
+    /// @param[out] rLinAz Linear Z-axis acceleration in mg.
+    void GetLinearAccel(const data::SamplePacket &rPacket, float &rLinAx,
                         float &rLinAy, float &rLinAz);
 
     // void CalculateVelocityRealTime(data::SamplePacket &rPacket, )

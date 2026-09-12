@@ -28,23 +28,16 @@ void DataContext::DropPreBufferToEndData()
     }
 }
 
-void DataContext::CalculateMagnitude(data::SamplePacket &rPacket,
-                                     float &rAccelMag, float &rGyroMag)
+float DataContext::CalculateAccelMagnitude(const data::SamplePacket &rPacket)
 {
     float ax = rPacket.a[0];
     float ay = rPacket.a[1];
     float az = rPacket.a[2];
-
-    float qx = rPacket.q[1];
-    float qy = rPacket.q[2];
-    float qz = rPacket.q[3];
-
-    rAccelMag = std::sqrt(ax * ax + ay * ay + az * az);
-    rGyroMag = std::sqrt(qx * qx + qy * qy + qz * qz);
+    return std::sqrt(ax * ax + ay * ay + az * az);
 }
 
-void DataContext::GetLinearAccel(data::SamplePacket &rPacket, float &rLinAx,
-                                 float &rLinAy, float &rLinAz)
+void DataContext::GetLinearAccel(const data::SamplePacket &rPacket,
+                                 float &rLinAx, float &rLinAy, float &rLinAz)
 {
     rLinAx = (float)rPacket.a[0] - (float)m_AccelBias.axBias
              - (float)rPacket.gv[0];

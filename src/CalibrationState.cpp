@@ -9,7 +9,6 @@ namespace
 {
 // Threshold for determining stillness.
 constexpr float STILLNESS_ACCEL_VAR_THS = 120.0f;
-constexpr float GYRO_VAR_THS = 30.0f;
 }
 CalibrationState::CalibrationState(DataContext &rDataCtx, W8BandFsm &rFsm)
     : fsm::IState<DataContext, StateId>(rDataCtx), m_rFsm(rFsm)
@@ -62,13 +61,10 @@ void CalibrationState::Update()
 
 void CalibrationState::AccumulatingHandler(data::SamplePacket &rPacket)
 {
-    float accelMag;
-    float gyroMag;
-    DataContext::CalculateMagnitude(rPacket, accelMag, gyroMag);
+    const float accelMag = DataContext::CalculateAccelMagnitude(rPacket);
+    m_Window.Push(accelMag);
 
-    m_Window.Push(accelMag, gyroMag);
-
-    if(!m_Window.isStill(STILLNESS_ACCEL_VAR_THS, GYRO_VAR_THS))
+    if(!m_Window.IsStill(STILLNESS_ACCEL_VAR_THS))
     {
         Serial.println("Not Still");
         m_BiasAccumulator.Reset();
@@ -97,11 +93,9 @@ void CalibrationState::CalibrationDoneHandler()
 
 void CalibrationState::StillnessWaitHandler(data::SamplePacket &rPacket)
 {
-    float accelMag;
-    float gyroMag;
-    DataContext::CalculateMagnitude(rPacket, accelMag, gyroMag);
-    m_Window.Push(accelMag, gyroMag);
-    if(!m_Window.isStill(STILLNESS_ACCEL_VAR_THS, GYRO_VAR_THS))
+    const float accelMag = DataContext::CalculateAccelMagnitude(rPacket);
+    m_Window.Push(accelMag);
+    if(!m_Window.IsStill(STILLNESS_ACCEL_VAR_THS))
     {
         return;
     }

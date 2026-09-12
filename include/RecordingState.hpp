@@ -1,101 +1,133 @@
 #pragma once
+
 #include "DataContext.hpp"
-#include "DataTypes.hpp"
 #include "IState.hpp"
 #include "W8BandFsm.hpp"
-#include "helpers/SlidingWindow.hpp"
+#include "helpers/EndMotionDetector.hpp"
+#include "helpers/ProcessingHelpers.hpp"
+#include <string>
 
-#define STOP_MOTION_WINDOW_SIZE 80
-
-/// Safety recording timeout, in case end-of-motion never fires cleanly
-#define RECORDING_TIMEOUT_MS 8000
-
-/// Value in ms describing how long a signal must stay near-zero in order to fire end-of-motion
-#define END_OF_MOTION_DWELL_MS 250
-
-/// Value in ms describing for how long we will be appending data when device
-/// fired end-of-motion - for easier ZUPT processing
-#define POST_STOP_CAPTURE_MS 400
-
-/// @brief Describes current motion direction during Recording State
-enum class MotionDirection
-{
-    Unknown,
-    GoingUp,
-    GoingDown,
-    NearZero
-};
+#define END_MOTION_WINDOW_SIZE 24
 
 namespace w8band::StateMachine
 {
+/// Online phases only gate the end detector. The precise turnaround sample is
+/// still determined later from the complete, zero-velocity-corrected signal.
+enum class RecordingPhase
+{
+    /// Waiting for confirmed negative vertical velocity.
+    AwaitingEccentric,
+    /// Barbell is moving down; waiting for confirmed upward reversal.
+    Eccentric,
+    /// Barbell is moving up; monitoring terminal deceleration.
+    Concentric,
+    /// Strict end thresholds passed; validating them with hysteresis.
+    StopCandidate,
+    /// End confirmed; collecting a stationary tail for ZUPT.
+    PostStopCapture
+};
+
+/// @brief Records one repetition and detects its end using phase history,
+/// filtered vertical acceleration, integrated velocity and rolling stillness.
 class RecordingState : public fsm::IState<DataContext, StateId>
 {
 public:
+    /// @brief Constructs RecordingState using shared data and its parent FSM.
+    /// @param[in,out] rDataCtx Shared acquisition and recording context.
+    /// @param[in,out] rFsm State machine used to request transitions.
     RecordingState(DataContext &rDataCtx, W8BandFsm &rFsm);
 
-    /// @brief @see IState::OnEnter()
+    /// @brief Resets online processing and replays the pre-record buffer.
     void OnEnter() override;
 
-    /// @brief @see IState::OnExit()
+    /// @brief Handles leaving RecordingState. Currently performs no cleanup.
     void OnExit() override;
 
-    /// @brief @see IState::Update()
+    /// @brief Acquires and processes the next sample or fires a safety stop.
     void Update() override;
 
-    /// @brief @see IState::GetSateId()
+    /// @brief Returns the identifier used by the state machine.
+    /// @return StateId::RecordingState.
     StateId GetStateId() const override;
 
-    /// @brief Human-readable name, kept separate from GetStateId() so the
-    ///        FSM's internal lookups stay a cheap enum compare.
+    /// @brief Returns a human-readable state name.
+    /// @return Recording state name.
     std::string GetStateName() const override;
 
 private:
-    /// @brief Helper for setting direction using Schmitt Hysteresis for more accurate Motion Direction
-    void UpdateDirection();
+    /// @brief Updates the online signal path using one synchronized IMU sample.
+    /// @param[in] rPacket Sample containing sensor timestamp, acceleration,
+    /// gravity vector and orientation quaternion.
+    void ProcessSample(const data::SamplePacket &rPacket);
 
-    /// @brief Helper for calculating velocity in real time in order to
-    /// accuratelly determine end of motion and set proper MotinDirection
-    /// @param[in] rPacket Reference to currently obtained data for calculation
-    void IntegrateVelocityRT(data::SamplePacket &rPacket);
+    /// @brief Evaluates phase-transition conditions for the current sample.
+    /// @param[in] timestampTicks Raw LSM6DSV16X timestamp of current sample.
+    void UpdatePhase(uint32_t timestampTicks);
 
-    /// @brief Helper used to check the direction and properly transtition to
-    /// ProcessingState based on device's OZ velocity
-    void CheckForEndOfMotion();
+    /// @brief Changes phase and initializes phase-specific timestamps.
+    /// @param[in] phase New recording phase.
+    /// @param[in] timestampTicks Raw timestamp at which phase was entered.
+    void SetPhase(RecordingPhase phase, uint32_t timestampTicks);
 
-    /// @brief Reference to State Machine for state transition
+    /// @brief Confirms that a directional condition remains true for a dwell.
+    /// @param[in] condition Current directional condition value.
+    /// @param[in] timestampTicks Raw timestamp of current sample.
+    /// @param[in] dwellMs Required uninterrupted dwell duration in milliseconds.
+    /// @return True once the condition has remained true for dwellMs.
+    bool UpdateDirectionalDwell(bool condition, uint32_t timestampTicks,
+                                uint32_t dwellMs);
+
+    /// @brief Checks strict thresholds required to enter StopCandidate.
+    /// @return True when velocity and both stillness metrics meet entry limits.
+    bool IsStrictEndCandidate() const;
+
+    /// @brief Checks wider thresholds used to keep StopCandidate active.
+    /// @return True while the candidate remains inside hysteresis limits.
+    bool IsRelaxedEndCandidate() const;
+
+    /// @brief State machine used to request transition to ProcessingState.
     W8BandFsm &m_rFsm;
 
-    /// @brief Stillness detector for end of motion detection
-    helpers::StillnessDetector<STOP_MOTION_WINDOW_SIZE> m_Window;
+    /// @brief Rolling acceleration statistics used for end detection.
+    helpers::EndMotionDetector<END_MOTION_WINDOW_SIZE> m_EndDetector;
 
-    /// @brief Tells whether we have previous sample packet for integrating
+    /// @brief Causal filter applied to vertical world-frame acceleration.
+    helpers::Processing::LowPassFilter m_VerticalAccelFilter;
+
+    /// @brief Previous quaternion used to preserve quaternion sign continuity.
+    helpers::Processing::Quat m_PreviousQuat{1.0f, 0.0f, 0.0f, 0.0f};
+
+    /// @brief Current phase of the online repetition observer.
+    RecordingPhase m_Phase = RecordingPhase::AwaitingEccentric;
+
+    /// @brief True after the integrator receives its first sample.
     bool m_HavePrevSample = false;
 
-    /// @brief Acceleration in Z axis 1 sample before
-    float m_PrevWorldAz = 0.0f;
+    /// @brief Previous filtered vertical acceleration in m/s^2.
+    float m_PrevFilteredWorldAz = 0.0f;
 
-    /// @brief Timestamp of 1 sample before
-    uint32_t m_PrevTimestampMs = 0;
+    /// @brief Raw sensor timestamp of the previous integrated sample.
+    uint32_t m_PrevTimestampTicks = 0;
 
-    /// @brief Current direction
-    MotionDirection m_Direction;
-
-    /// @brief Current velocity in Z axis
+    /// @brief Current online estimate of vertical velocity in m/s.
     float m_CurrVelocityZ = 0.0f;
 
-    /// @brief Set when device's velocity has passed kUpThreshold
-    bool m_HasSeenGoingUp = false;
+    /// @brief Maximum vertical velocity observed during concentric phase.
+    float m_PeakVelocityZ = 0.0f;
 
-    /// @brief True if device is in near zero state
-    bool m_IsNearZeroDwell;
+    /// @brief True after velocity drops sufficiently from its concentric peak.
+    bool m_TerminalDecelerationSeen = false;
 
-    /// @brief Time in ms in which the device is in near zero state
-    uint32_t m_NearZeroTimeMs;
+    /// @brief True while a directional transition dwell is being measured.
+    bool m_DirectionalDwellActive = false;
 
-    /// @brief True if end-of-motion fired, and we want to keep on tracking
-    bool m_CapturingPostStop = false;
+    /// @brief Sensor timestamp at which directional dwell began.
+    uint32_t m_DirectionalDwellStartedTicks = 0;
 
-    /// @brief Time in ms when m_CapturingPostStop was true.
-    uint32_t m_PostStopStartedMs = 0;
+    /// @brief Sensor timestamp at which StopCandidate was entered.
+    uint32_t m_StopCandidateStartedTicks = 0;
+
+    /// @brief Sensor timestamp at which post-stop capture began.
+    uint32_t m_PostStopStartedTicks = 0;
 };
-}
+} // namespace w8band::StateMachine

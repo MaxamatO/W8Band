@@ -1,4 +1,4 @@
-# W8Band — WSTEPNA rchitektura systemu
+# W8Band — wstępna architektura systemu
 
 ## Cel urządzenia
 
@@ -38,15 +38,16 @@ pomiaru, nie kwestia implementacji.
 
 ## Podział odpowiedzialności (warstwy)
 
-1. **FSM (`fsm::StateMachine` + konkretne stany)** — czysta orkiestracja. Stany
-   decydują *kiedy* co się dzieje, nie *jak*. Żadnej matematyki przetwarzania
-   sygnału wewnątrz stanów.
-2. **`MotionProcessor`** (nowa klasa, do dodania) — cała logika przetwarzania
-   sygnału (patrz niżej). Bezstanowa (albo prawie), operuje na buforze
+1. **FSM (`fsm::StateMachine` + konkretne stany)** — orkiestracja oraz lekki
+   obserwator online potrzebny do wykrycia fazy i końca ruchu. Filtr, okna
+   sygnałowe i reguły detekcji są wydzielone do helperów; ciężkie i dokładne
+   przetwarzanie całego powtórzenia pozostaje poza stanami.
+2. **`MotionProcessor`** — zaimplementowana, niezależna od Arduino logika
+   przetwarzania sygnału (patrz niżej). Jest bezstanowa i operuje na buforze
    `DataContext::m_Data` przekazanym z zewnątrz. Wywoływana wyłącznie z
    `ProcessingState`.
 3. **`DataContext`** — dane współdzielone: bufory (pre-buffer, bufor powtórzenia,
-   wynik przetworzenia), parametry kalibracji (bias akcelerometru/żyroskopu),
+   wynik przetworzenia), parametry kalibracji (bias akcelerometru),
    flagi (np. `m_WakeUpDetected`, docelowo zamiast globalnej zmiennej
    `w8band::v_WakeUpDetected`).
 4. **`BleServiceManager` / `LsmServiceManager`** — warstwa sprzętowa, bez zmian
@@ -65,11 +66,11 @@ BLE advertising, urządzenie czeka na połączenie i komendę "Kalibruj" z aplik
 
 Wyzwalana komendą z appki, gdy sztanga leży płasko na stojaku (bezruch).
 
-- Pilnuje wariancji przyspieszenia/żyroskopu w oknie ~0.5-1s, żeby potwierdzić
-  realny bezruch — pojedyncza próbka nie wystarczy.
-- Po potwierdzeniu bezruchu liczy: bias akcelerometru (per oś, w układzie ciała
-  czujnika — bias sprzętowy jest tam stały), bias żyroskopu (powinien być ~0,
-  odchylenie sygnalizuje dryf temperaturowy), punkt odniesienia grawitacji.
+- Pilnuje wariancji modułu przyspieszenia w oknie ~0.5-1s, żeby potwierdzić
+  realny bezruch — pojedyncza próbka nie wystarczy. Bieżący `SamplePacket` nie
+  zawiera żyroskopu, więc kwaternionu nie wolno traktować jako jego zamiennika.
+- Po potwierdzeniu bezruchu liczy bias akcelerometru per oś w układzie ciała
+  czujnika, porównując pomiar akcelerometru z wektorem grawitacji SFLP.
 - Jeśli wariancja nie spada w rozsądnym czasie (np. 3s) → zgłoś błąd do appki
   zamiast fałszywie potwierdzonej kalibracji.
 
@@ -83,31 +84,42 @@ już zaimplementowany) skorygowany o bias, nasłuchuje przerwania wake-up.
   dryfuje z temperaturą w trakcie sesji treningowej, jednorazowa kalibracja na
   starcie nie wystarczy na dłuższą metę.
 
-### 4. Armed
+### 4. Armed (rezerwa)
 
-Bardzo krótki stan przejściowy (dokładnie to, co macie zakomentowane w starym
-kodzie `W8BandServiceManager.cpp`, teraz w porządnej formie):
-
-- Zrzut pre-buffera do bufora powtórzenia (`m_Data`).
-- Restart FIFO (bypass → stream) dla czystego startu strumienia.
-- Zapis znacznika czasu startu.
-- Natychmiastowe przejście do Recording.
+`StateId::ArmedState` jest zarezerwowany, ale nie ma obecnie osobnej
+implementacji. `BufferringState` przechodzi bezpośrednio do `RecordingState`,
+który w `OnEnter()` zrzuca pre-buffer i inicjalizuje obserwator online. Osobny
+stan ma sens dopiero wtedy, gdy dojdą dodatkowe operacje atomowe przed zapisem,
+na przykład negocjowanie miejsca w buforze albo jawne uzbrajanie aplikacji.
 
 ### 5. Recording
 
 Zapisuje pełną serię próbek do bufora powtórzenia.
 
-- Koniec wyzwalany przez: prędkość wraca blisko zera **i utrzymuje się tam przez
-  minimalny czas** (warunek symetryczny do wake-up — pojedyncza chwila ciszy to
-  nie koniec ruchu), albo timeout bezpieczeństwa (obecne `RECORDING_TIME_MS`).
-- Świadomie NIE segmentuje faz ruchu na żywo — potrzeba całego powtórzenia do
-  wiarygodnej segmentacji (patrz pipeline niżej).
+- Pre-buffer przechodzi przez ten sam przyczynowy filtr 10 Hz i integrator co
+  nowe próbki. Dzięki temu obserwator prędkości startuje z rzeczywistego
+  odcinka bezruchu, bez sztucznego stanu początkowego filtra.
+- Lekka maszyna faz online potwierdza kolejno: ekscentrykę, koncentrykę,
+  hamowanie końcowe, kandydata bezruchu i ogon po zatrzymaniu. Nie wskazuje ona
+  dokładnej próbki zawrotu; jedynie uniemożliwia odpalenie końca przed pełną
+  sekwencją ruchu dół-góra.
+- Kandydat końca łączy historię faz, prędkość pionową, wariancję modułu
+  przyspieszenia i RMS pionowego przyspieszenia w świecie. Osobne, szersze
+  progi wyjścia tworzą histerezę i zapobiegają migotaniu detekcji.
+- Czasy potwierdzania faz i bezruchu są liczone z `timestamp_ticks` sensora.
+  `millis()` służy wyłącznie jako niezależny timeout bezpieczeństwa (8 s).
+- Po potwierdzonym bezruchu zapisuje jeszcze 300 ms danych dla końcowej kotwicy
+  ZUPT, a następnie przechodzi do `ProcessingState`.
+- Dokładna zawrotka oraz metryki są liczone dopiero z kompletnego sygnału po
+  korekcji dryftu (patrz pipeline niżej).
 
 ### 6. Processing
 
 Cała matematyka (opis w sekcji "Pipeline przetwarzania sygnału") odpalona na
 kompletnym buforze powtórzenia, przez `MotionProcessor`. Jedyne miejsce, gdzie
-dzieje się "ciężkie" liczenie.
+dzieje się "ciężkie" liczenie. Dopóki `SendingState` nie jest zaimplementowany,
+wynik jest wypisywany przez Serial, zachowywany w `DataContext`, a FSM wraca do
+`BufferringState`, aby urządzenie nie zatrzymywało się po pierwszym powtórzeniu.
 
 ### 7. Sending
 
@@ -137,11 +149,13 @@ Uruchamiany raz, na kompletnym buforze powtórzenia, w stanie Processing.
 3. **Usunięcie grawitacji** — obrót wektora przyspieszenia z układu ciała do
    układu świata przez kwaternion orientacji, odjęcie wektora grawitacji
    (0, 0, g) → zostaje przyspieszenie liniowe w układzie świata.
-4. **Filtr dolnoprzepustowy** — Butterworth 2. rzędu, odcięcie ~15-20 Hz, na
+4. **Filtr dolnoprzepustowy** — Butterworth 2. rzędu, domyślne odcięcie 10 Hz,
+   wykonany w obu kierunkach (`filtfilt`) na
    przyspieszeniu liniowym PRZED całkowaniem. Szum MEMS mocno się wzmacnia przy
    podwójnym całkowaniu, jeśli nie zostanie wycięty wcześniej.
 5. **Całkowanie trapezowe** (albo Simpsona): przyspieszenie → prędkość →
-   pozycja, krok czasowy liczony z `timestamp_ms` każdej próbki.
+   pozycja, krok czasowy liczony z różnicy `timestamp_ticks` z FIFO sensora
+   (`1 tick = 21,75 µs` nominalnie), a nie z czasu odczytu przez MCU.
 6. **Korekcja dryftu (ZUPT — zero-velocity update)** — wiadomo, że v(0)=0 oraz
    v(T)=0 (początek i koniec powtórzenia to spoczynek). Policz błąd
    skumulowany na końcu całkowania prędkości i odejmij liniowy trend od całej
@@ -162,19 +176,21 @@ Uruchamiany raz, na kompletnym buforze powtórzenia, w stanie Processing.
      się trwale dodatnia.
    - Koncentryka → koniec: prędkość wraca blisko zera i utrzymuje się (ten sam
      warunek co koniec nagrywania).
-8. **Wygładzenie finalnej trajektorii** przed wysyłką — np. filtr
-   Savitzky-Golay albo prosta średnia krocząca, żeby wykres w aplikacji nie
-   wyglądał "poszarpanie".
+8. **Redukcja wyniku** — współrzędna pozioma jest wyznaczana metodą PCA,
+   a trajektoria redukowana domyślnie do 100 punktów `int16` w milimetrach.
+   Dokładny punkt zawrotu jest zawsze zachowany w zredukowanym przebiegu.
+   `ProcessingResult` przechowuje również ROM, prędkości, czasy faz i — gdy
+   skonfigurowano masę sztangi — moc mechaniczną.
 
 ## Parametry próbkowania i przepustowości (kontekst)
 
 - 120 Hz (już skonfigurowane, `IMU_FREQ`) — wystarczające dla typowego tempa
   powtórzenia (1-3s).
-- Pojedyncze powtórzenie (~4s × 120 Hz = 480 próbek × 20 B `SamplePacket`) =
-  ~9.6 KB — mieści się bez problemu w RAM nRF52840 (256 KB), batch processing
+- Pojedyncze powtórzenie (~4s × 120 Hz = 480 próbek × 24 B `SamplePacket`) =
+  ~11,5 KB — mieści się bez problemu w RAM nRF52840 (256 KB), batch processing
   w pamięci jest w pełni wykonalny, nie potrzeba strumieniowania.
-- Wysyłanie przetworzonej trajektorii (np. 480 punktów × ~8 B jako int16 x,y)
-  ≈ 4 KB jednorazowo po zakończeniu powtórzenia — dużo lżejsze niż strumieniowanie
+- Wysyłanie przetworzonej trajektorii (domyślnie 100 punktów × 4 B jako
+  `int16 h,z`) to około 400 B plus metryki — dużo lżejsze niż strumieniowanie
   surowych danych IMU w czasie rzeczywistym, i to jest właściwy sens "edge
   computing" w tym projekcie.
 

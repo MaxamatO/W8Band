@@ -20,6 +20,7 @@
 #define TAG_GAME_ROTATION_VECTOR 0x13u
 #define TAG_GRAVITY_VECTOR 0x17u
 #define TAG_ACCELEROMETER 0x02u
+#define TAG_TIMESTAMP 0x04u
 
 #define ALGO_FREQ 120U
 
@@ -81,6 +82,9 @@ bool LsmServiceManager::InitLsm()
     status |= m_Imu.FIFO_Set_Mode(LSM6DSV16X_BYPASS_MODE);
     delay(20);
     status |= m_Imu.Set_SFLP_Batch(true, true, false);
+    status |= m_Imu.FIFO_Enable_Timestamp();
+    status |= m_Imu.FIFO_Set_Timestamp_Decimation(
+        LSM6DSV16X_TMSTMP_DEC_1);
     Serial.println("after gvec 2");
     delay(10);
     status |= m_Imu.FIFO_Set_X_BDR(IMU_FREQ);
@@ -132,6 +136,12 @@ void LsmServiceManager::ResetFIFO()
     delay(20);
     m_Imu.FIFO_Set_Mode(LSM6DSV16X_STREAM_MODE);
     delay(20);
+
+    // Do not let data from before the reset become part of the first frame.
+    m_HaveFreshAccel = false;
+    m_HaveFreshQuat = false;
+    m_HaveFreshGV = false;
+    m_HaveFreshTimestamp = false;
 }
 
 void LsmServiceManager::FillBufferData() {}
@@ -179,14 +189,24 @@ bool LsmServiceManager::ObtainData(data::SamplePacket &rPacketOut)
         {
             m_Imu.FIFO_Get_Gravity_Vector(m_LatestGravityVector);
             m_HaveFreshGV = true;
+        } else if(m_Tag == TAG_TIMESTAMP)
+        {
+            if(m_Imu.FIFO_Get_Timestamp(&m_LatestTimestampTicks)
+               != LSM6DSV16X_OK)
+            {
+                Serial.println("Error in FIFO GET TIMESTAMP");
+                return false;
+            }
+            m_HaveFreshTimestamp = true;
         } else
         {
-            int32_t dummy[3];
-            m_Imu.FIFO_Get_G_Axes(dummy);
+            uint8_t dummy[6];
+            m_Imu.FIFO_Get_Data(dummy);
             continue;
         }
 
-        if(m_HaveFreshAccel && m_HaveFreshQuat && m_HaveFreshGV)
+        if(m_HaveFreshAccel && m_HaveFreshQuat && m_HaveFreshGV
+           && m_HaveFreshTimestamp)
         {
             elapsedTime = millis() - startTime;
 
@@ -203,10 +223,11 @@ bool LsmServiceManager::ObtainData(data::SamplePacket &rPacketOut)
             rPacketOut.gv[1] = (int16_t)m_LatestGravityVector[1]; // Y
             rPacketOut.gv[2] = (int16_t)m_LatestGravityVector[2]; // Z
 
-            rPacketOut.timestamp_ms = millis();
+            rPacketOut.timestamp_ticks = m_LatestTimestampTicks;
             m_HaveFreshAccel = false;
             m_HaveFreshGV = false;
             m_HaveFreshQuat = false;
+            m_HaveFreshTimestamp = false;
 
             return true;
         }
