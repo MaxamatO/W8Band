@@ -45,10 +45,11 @@ void PrintProcessingResult(const Motion::ProcessingResult &rResult)
     Serial.printf("ROM: %d mm, vmax: %d mm/s, vmean: %d mm/s\n",
                   rResult.verticalRomMm, rResult.maxVelocityMmPerSec,
                   rResult.meanConcentricVelocityMmPerSec);
-    Serial.printf("Eccentric: %lu ms, concentric: %lu ms, gravity std: %u mg\n",
-                  static_cast<unsigned long>(rResult.eccentricDurationMs),
-                  static_cast<unsigned long>(rResult.concentricDurationMs),
-                  rResult.maxWorldGravityStdMg);
+    Serial.printf(
+        "Eccentric: %lu ms, concentric: %lu ms, gravity std: %u mg\n",
+        static_cast<unsigned long>(rResult.eccentricDurationMs),
+        static_cast<unsigned long>(rResult.concentricDurationMs),
+        rResult.maxWorldGravityStdMg);
     if(rResult.powerValid)
     {
         Serial.printf("Power max: %ld mW, mean: %ld mW\n",
@@ -63,8 +64,7 @@ void PrintProcessingResult(const Motion::ProcessingResult &rResult)
     for(uint16_t i = 0; i < rResult.trajectoryPointCount; ++i)
     {
         const Motion::TrajectoryPoint &rPoint = rResult.trajectory[i];
-        Serial.printf("%u,%d,%d,%u\n", i, rPoint.horizontalMm,
-                      rPoint.verticalMm,
+        Serial.printf("%u,%d,%d,%u\n", i, rPoint.horizontalMm, rPoint.verticalMm,
                       i == rResult.turnaroundTrajectoryIndex ? 1U : 0U);
     }
 }
@@ -85,9 +85,11 @@ void ProcessingState::OnEnter()
     PrintRawCapture(m_rContext);
 #endif
 
-    // SendingState is not registered yet. Keep the device usable for the next
-    // repetition; once BLE transport exists, this target becomes SendingState.
-    m_rFsm.RequestTransition(StateId::BufferringState);
+    // After complete repetition and sent data, device transfers to IdleState
+    // waiting for another Calibration triggered by BLE. We do that, since we
+    // want to only calculate a single repetition - one rep max
+    m_rContext.m_ResultReady = true;
+    m_rFsm.RequestTransition(StateId::IdleState);
 }
 
 void ProcessingState::OnExit() {}

@@ -24,13 +24,28 @@ struct TrajectoryPoint
 /// @brief Detailed outcome of batch motion processing.
 enum class ProcessingStatus : uint8_t
 {
+    /// @brief Processing has not started.
     NotProcessed,
+
+    /// @brief Processing completed successfully.
     Ok,
+
+    /// @brief The capture contains too few samples.
     NotEnoughSamples,
+
+    /// @brief Sensor timestamps are invalid.
     InvalidTimestamp,
+
+    /// @brief One or more synchronized sensor values are missing.
     MissingSamples,
+
+    /// @brief A quaternion is invalid or cannot be normalized.
     InvalidQuaternion,
+
+    /// @brief The gravity vector does not pass validation.
     InvalidGravity,
+
+    /// @brief The selected filter parameters are invalid.
     InvalidFilterConfiguration
 };
 

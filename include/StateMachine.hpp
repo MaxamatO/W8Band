@@ -12,13 +12,16 @@ template <typename TContext, typename TStateId, std::size_t MaxStates = 8>
 class StateMachine
 {
 public:
+    /// @brief State interface stored by the machine.
     using State = IState<TContext, TStateId>;
 
+    /// @brief Constructs a state machine using a shared context.
+    /// @param[in,out] rContext Shared data passed to every state.
     explicit StateMachine(TContext &rContext) : m_rContext(rContext) {}
 
     /// @brief Registers a state with the machine.
-    /// @param[in] id StateId to register
-    /// @param[in] pState Pointer to a state for ownership transfer
+    /// @param[in] id State identifier to register.
+    /// @param[in] pState State whose ownership is transferred to the machine.
     void AddState(TStateId id, std::unique_ptr<State> pState)
     {
         if(m_StateCount >= MaxStates)
@@ -31,7 +34,7 @@ public:
     }
 
     /// @brief Selects the initial state and calls its OnEnter()
-    /// @param initialId Initial StateId to start with
+    /// @param[in] initialId Initial state identifier.
     /// @return True if the id was found and fsm has started, false otherwise
     bool Start(TStateId initialId)
     {
@@ -48,7 +51,7 @@ public:
 
     /// @brief Requests a transition to a new state. Called from within a state
     /// for a transition.
-    /// @param id StateId to which state has requested a transition.
+    /// @param[in] id Identifier of the requested state.
     void RequestTransition(TStateId id)
     {
         m_HasPendingTransition = true;
@@ -78,13 +81,18 @@ public:
     bool IsStarted() const { return m_pCurrentState != nullptr; }
 
 private:
+    /// @brief Registered state and its identifier.
     struct StateEntry
     {
+        /// @brief Identifier used to find the state.
         TStateId id{};
+
+        /// @brief State instance owned by the machine.
         std::unique_ptr<State> pState;
     };
+
     /// @brief Method used for finding specific state
-    /// @param id StateId to find
+    /// @param[in] id State identifier to find.
     /// @return Pointer to found State
     State *FindState(TStateId id)
     {
@@ -136,4 +144,4 @@ private:
     /// @brief Variable for holding pedning state's id
     TStateId m_PendingStateId{};
 };
-} // namespace w8band::StateMachine
+} // namespace fsm

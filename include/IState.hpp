@@ -9,6 +9,7 @@ namespace fsm
 template <typename TContext, typename TStateId> class IState
 {
 public:
+    /// @brief Destroys a state through the common interface.
     virtual ~IState() = default;
 
     /// @brief Called when transition into this state is applied
@@ -24,9 +25,13 @@ public:
     /// @return one of StateId defined in enum class StateId
     virtual TStateId GetStateId() const = 0;
 
+    /// @brief Returns a human-readable state name.
+    /// @return Name of the state.
     virtual std::string GetStateName() const { return "BaseState"; }
 
 protected:
+    /// @brief Stores the shared context used by the state.
+    /// @param[in,out] rContext Shared data used by all states.
     explicit IState(TContext &rContext) : m_rContext(rContext) {}
 
     /// @brief Shared data struct

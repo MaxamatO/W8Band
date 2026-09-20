@@ -96,3 +96,11 @@ Nastepnie przeniesc to z freeRTOS na Zephyr, zeby wykorzystac optymalizacje ofer
 
 PROBLEMY:
     Transfer z BUFFERRING LIFT OFF DETECTED, do RecordingState dzieje sie zbyt szybko. Pierw powinno zostac ustawione Barbell is still, waiting for motion, dopiero przy wiekszym ruchu, powinien byc przeskok do RecordingState.
+
+## FILTERING
+
+### Wybor filtra
+
+- Wybor IIR filter  - high performance with lower orders
+    Downside: can be unstable, move graph out of phase
+- Kalmann fitler? - best fit but we do not have any other way to measure absolute position to apply that filter

@@ -35,7 +35,7 @@ public:
     std::string GetStateName() const override;
 
 private:
-    /// @brief State machine used to resume buffering after processing.
+    /// @brief State machine used to enter IdleState after processing.
     W8BandFsm &m_rFsm;
 };
 

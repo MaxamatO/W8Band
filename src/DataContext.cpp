@@ -8,6 +8,19 @@ DataContext::DataContext(Hardware::BleServiceManager &m_rBle,
     : m_rBleServiceManager(m_rBle), m_rLsmServiceManager(rLsm)
 {}
 
+void DataContext::Reset()
+{
+    m_PreIndex = 0;
+    m_PreCount = 0;
+    m_Data.clear();
+    m_LiftOffDetected = false;
+    m_MotionStartDetected = false;
+    m_RecordingStartedMs = false;
+    m_AccelBias = {};
+    m_CalibrationValid = false;
+    m_ResultReady = false;
+}
+
 void DataContext::PushToPreBuffer(data::SamplePacket &rPacket)
 {
     m_PreBuffer[m_PreIndex] = rPacket;

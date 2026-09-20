@@ -18,13 +18,23 @@ constexpr float PI = 3.14159265358979323846f;
 constexpr float QUATERNION_MIN_NORM = 0.5f;
 constexpr float MOTION_START_VELOCITY_MPS = -0.05f;
 
+/// @brief Internal three-dimensional vector used by the processing pipeline.
 struct Vec3
 {
+    /// @brief X-axis component.
     float x = 0.0f;
+
+    /// @brief Y-axis component.
     float y = 0.0f;
+
+    /// @brief Z-axis component.
     float z = 0.0f;
 };
 
+/// @brief Reads one component of an internal three-dimensional vector.
+/// @param[in] rVector Vector whose component is requested.
+/// @param[in] axis Component index: 0 for X, 1 for Y and 2 for Z.
+/// @return Value of the requested vector component.
 float GetComponent(const Vec3 &rVector, std::size_t axis)
 {
     if(axis == 0)
@@ -38,6 +48,10 @@ float GetComponent(const Vec3 &rVector, std::size_t axis)
     return rVector.z;
 }
 
+/// @brief Replaces one component of an internal three-dimensional vector.
+/// @param[in,out] rVector Vector whose component is replaced.
+/// @param[in] axis Component index: 0 for X, 1 for Y and 2 for Z.
+/// @param[in] value New component value.
 void SetComponent(Vec3 &rVector, std::size_t axis, float value)
 {
     if(axis == 0)
@@ -52,9 +66,17 @@ void SetComponent(Vec3 &rVector, std::size_t axis, float value)
     }
 }
 
+/// @brief Calculates the scalar product of two three-dimensional vectors.
+/// @param[in] rLeft Left-hand vector.
+/// @param[in] rRight Right-hand vector.
+/// @return Scalar product of rLeft and rRight.
 float Dot(const Vec3 &rLeft, const Vec3 &rRight)
 { return rLeft.x * rRight.x + rLeft.y * rRight.y + rLeft.z * rRight.z; }
 
+/// @brief Calculates the right-handed cross product of two vectors.
+/// @param[in] rLeft Left-hand vector.
+/// @param[in] rRight Right-hand vector.
+/// @return Vector perpendicular to rLeft and rRight.
 Vec3 Cross(const Vec3 &rLeft, const Vec3 &rRight)
 {
     return {rLeft.y * rRight.z - rLeft.z * rRight.y,
@@ -62,6 +84,9 @@ Vec3 Cross(const Vec3 &rLeft, const Vec3 &rRight)
             rLeft.x * rRight.y - rLeft.y * rRight.x};
 }
 
+/// @brief Normalizes a vector in place to unit Euclidean length.
+/// @param[in,out] rVector Vector to normalize; replaced by its unit vector.
+/// @return True on success, or false for a zero-length/non-finite vector.
 bool Normalize(Vec3 &rVector)
 {
     const float norm = std::sqrt(Dot(rVector, rVector));
@@ -75,6 +100,10 @@ bool Normalize(Vec3 &rVector)
     return true;
 }
 
+/// @brief Creates a value-initialized unsuccessful processing result.
+/// @param[in] status Failure status reported to the caller.
+/// @param[in] sampleCount Number of supplied raw samples; clamped to uint16_t.
+/// @return Invalid processing result containing status and raw sample count.
 ProcessingResult Failure(ProcessingStatus status, std::size_t sampleCount)
 {
     ProcessingResult result{};
@@ -85,6 +114,9 @@ ProcessingResult Failure(ProcessingStatus status, std::size_t sampleCount)
     return result;
 }
 
+/// @brief Sorts timestamp deltas and calculates their statistical median.
+/// @param[in,out] rValues Non-empty delta buffer; sorted in ascending order.
+/// @return Median delta, including the mean of two middle values when even.
 float MedianSortedDeltas(std::vector<uint32_t> &rValues)
 {
     std::sort(rValues.begin(), rValues.end());
@@ -98,9 +130,11 @@ float MedianSortedDeltas(std::vector<uint32_t> &rValues)
               + static_cast<float>(rValues[middle]));
 }
 
-// Uses n-th element to place middle point in a place, it would end up after std::sort
-// - cheaper in calculation than full std::sort, since we only need median
-// Returns that median
+/// @brief Calculates a component-wise median without fully sorting the data.
+/// @param[in] rValues Non-empty vector collection to inspect.
+/// @param[in] axis Component index: 0 for X, 1 for Y and 2 for Z.
+/// @param[in,out] rScratch Reusable workspace overwritten with component values.
+/// @return Median value of the selected component.
 float MedianComponent(const std::vector<Vec3> &rValues, std::size_t axis,
                       std::vector<float> &rScratch)
 {
@@ -123,6 +157,11 @@ float MedianComponent(const std::vector<Vec3> &rValues, std::size_t axis,
     return 0.5f * (lower + upper);
 }
 
+/// @brief Applies a zero-phase second-order Butterworth low-pass filter.
+/// @param[in,out] rValues Signal samples, replaced by filtered samples.
+/// @param[in] sampleRateHz Effective sample rate derived from sensor timestamps.
+/// @param[in] cutoffHz Butterworth cutoff frequency in hertz.
+/// @return True when parameters are valid and filtering was completed.
 bool ApplyZeroPhaseLowPass(std::vector<float> &rValues, float sampleRateHz,
                            float cutoffHz)
 {
@@ -186,6 +225,11 @@ bool ApplyZeroPhaseLowPass(std::vector<float> &rValues, float sampleRateHz,
     return true;
 }
 
+/// @brief Integrates one axis of a vector signal using the trapezoidal rule.
+/// @param[in] rSignal Vector samples to integrate.
+/// @param[in] rTime Sample timestamps in seconds, matching rSignal in size.
+/// @param[in] axis Component index: 0 for X, 1 for Y and 2 for Z.
+/// @param[out] rIntegral Integrated samples with the first value set to zero.
 void IntegrateAxis(const std::vector<Vec3> &rSignal,
                    const std::vector<float> &rTime, std::size_t axis,
                    std::vector<float> &rIntegral)
@@ -202,6 +246,10 @@ void IntegrateAxis(const std::vector<Vec3> &rSignal,
     }
 }
 
+/// @brief Integrates a scalar signal using the trapezoidal rule.
+/// @param[in] rSignal Scalar samples to integrate.
+/// @param[in] rTime Sample timestamps in seconds, matching rSignal in size.
+/// @param[out] rIntegral Integrated samples with the first value set to zero.
 void IntegrateScalar(const std::vector<float> &rSignal,
                      const std::vector<float> &rTime,
                      std::vector<float> &rIntegral)
@@ -215,6 +263,13 @@ void IntegrateScalar(const std::vector<float> &rSignal,
     }
 }
 
+/// @brief Removes a linear velocity error between two inclusive anchors.
+/// @param[in,out] rVelocity Velocity samples corrected in place.
+/// @param[in] rTime Sample timestamps in seconds, matching rVelocity in size.
+/// @param[in] begin Index of the first sample included in the correction.
+/// @param[in] end Index of the last sample included in the correction.
+/// @param[in] beginVelocity Raw velocity error at the begin anchor.
+/// @param[in] endVelocity Raw velocity error at the end anchor.
 void RemoveLinearVelocityDrift(std::vector<float> &rVelocity,
                                const std::vector<float> &rTime,
                                std::size_t begin, std::size_t end,
@@ -222,22 +277,30 @@ void RemoveLinearVelocityDrift(std::vector<float> &rVelocity,
 {
     const float beginTime = rTime[begin];
     const float duration = rTime[end] - beginTime;
-    const float velocityChange = endVelocity - beginVelocity;
+    const float velocityChange
+        = endVelocity - beginVelocity; // This should be our drift b_v
     for(std::size_t i = begin; i <= end; ++i)
     {
         const float fraction
             = duration > 0.0f ? (rTime[i] - beginTime) / duration : 0.0f;
         const float correction = beginVelocity + fraction * velocityChange;
         rVelocity[i] -= correction;
-    }
+    } // Begin vlocity and End velocity gets zeroed out.
 }
 
+/// @brief Integrates acceleration and enforces zero velocity at known anchors.
+/// @param[in] rAcceleration Three-axis acceleration samples in m/s^2.
+/// @param[in] rTime Sample timestamps in seconds, matching acceleration in size.
+/// @param[in] axis Component index: 0 for X, 1 for Y and 2 for Z.
+/// @param[in] middleAnchor Optional middle anchor index; zero disables it.
+/// @param[out] rVelocity Drift-corrected velocity samples in m/s.
 void IntegrateWithZeroVelocityAnchors(const std::vector<Vec3> &rAcceleration,
                                       const std::vector<float> &rTime,
                                       std::size_t axis, std::size_t middleAnchor,
                                       std::vector<float> &rVelocity)
 {
-    IntegrateAxis(rAcceleration, rTime, axis, rVelocity);
+    IntegrateAxis(rAcceleration, rTime, axis,
+                  rVelocity); // Obtain velocity array
     if(middleAnchor > 0U && middleAnchor < rVelocity.size() - 1U)
     {
         // Keep all three values from the uncorrected integral. Correcting the
@@ -259,6 +322,9 @@ void IntegrateWithZeroVelocityAnchors(const std::vector<Vec3> &rAcceleration,
     }
 }
 
+/// @brief Rounds and saturates a floating-point value to signed 16-bit range.
+/// @param[in] value Floating-point value to convert.
+/// @return Nearest int16_t value, clamped instead of overflowing.
 int16_t ToInt16(float value)
 {
     const float minimum
@@ -269,6 +335,9 @@ int16_t ToInt16(float value)
         std::lround(std::max(minimum, std::min(value, maximum))));
 }
 
+/// @brief Rounds and saturates a floating-point value to signed 32-bit range.
+/// @param[in] value Floating-point value to convert.
+/// @return Nearest int32_t value, clamped instead of overflowing.
 int32_t ToInt32(float value)
 {
     const double minimum
@@ -280,6 +349,9 @@ int32_t ToInt32(float value)
     return static_cast<int32_t>(std::llround(clamped));
 }
 
+/// @brief Converts a non-negative duration in seconds to rounded milliseconds.
+/// @param[in] seconds Duration in seconds; non-positive values produce zero.
+/// @return Duration in milliseconds, saturated to uint32_t range.
 uint32_t ToMilliseconds(float seconds)
 {
     if(seconds <= 0.0f)
@@ -364,6 +436,7 @@ MotionProcessor::Process(const std::vector<data::SamplePacket> &rSamples,
 
         const helpers::Processing::Quat q
             = helpers::Processing::DecodeQuaternion(rPacket, previousQuat);
+        // Obtain linear accel in body frame by subtracting bias and gravity vector
         const float linearBodyX = static_cast<float>(rPacket.a[0])
                                   - static_cast<float>(rAccelBias.axBias)
                                   - static_cast<float>(rPacket.gv[0]);
@@ -374,6 +447,7 @@ MotionProcessor::Process(const std::vector<data::SamplePacket> &rSamples,
                                   - static_cast<float>(rAccelBias.azBias)
                                   - static_cast<float>(rPacket.gv[2]);
 
+        // Rotate both accel and gravity vector to world
         helpers::Processing::RotateBodyToWorld(
             q.w, q.x, q.y, q.z, linearBodyX, linearBodyY, linearBodyZ,
             acceleration[i].x, acceleration[i].y, acceleration[i].z);
@@ -398,6 +472,7 @@ MotionProcessor::Process(const std::vector<data::SamplePacket> &rSamples,
         gravityM2.z += delta.z * deltaAfter.z;
     }
 
+    // Obtain standard deviation and max standard deviation
     const Vec3 gravityStd{
         std::sqrt(gravityM2.x / static_cast<float>(sampleCount)),
         std::sqrt(gravityM2.y / static_cast<float>(sampleCount)),
@@ -428,15 +503,21 @@ MotionProcessor::Process(const std::vector<data::SamplePacket> &rSamples,
     }
 
     // Build reference axis
+    // If reference vector {1, 0, 0} was parallel to vertical axis, Dot product
+    // on ref . e_up, would give us result > 0.9
     Vec3 reference{1.0f, 0.0f, 0.0f};
     if(std::fabs(Dot(reference, up)) > 0.9f)
     {
         reference = {0.0f, 1.0f, 0.0f};
     }
 
-    // Build horizontal axis with Gram-Schmidt, to get orthogonal axis
+    // Build horizontal axis with Gram-Schmidt, to get orthogonal axis,
+    // We can achieve it because we already have our Up vector as a vertical
+    // axis, and since we built it using gravity vector rotated to world, we
+    // can assume it is pointing up.
+    // Then we want to build (x,y) axis around that Z axis, to do that, we use Gram-Schmidts algorithm.
     const float projection = Dot(reference, up);
-    Vec3 horizontalX{reference.x - projection * up.x,
+    Vec3 horizontalX{reference.x - projection * up.x, // hx = r - (r . e_up)e_up
                      reference.y - projection * up.y,
                      reference.z - projection * up.z};
     if(!Normalize(horizontalX))
@@ -476,26 +557,42 @@ MotionProcessor::Process(const std::vector<data::SamplePacket> &rSamples,
     }
 
     std::vector<float> preliminaryVelocity;
+
+    // Integrate preliminary velocityto obtain zero velocity anchors.
+    // We do it once here to get proper middle anchor (turnaround index), the
+    // final integration for velocity will be done afterwards
     IntegrateWithZeroVelocityAnchors(acceleration, time, 2U, 0U,
                                      preliminaryVelocity);
+
     std::vector<float> preliminaryPosition;
+
     IntegrateScalar(preliminaryVelocity, time, preliminaryPosition);
 
+    // We discard ~5% of samples from the beginning and the end of the array (our
+    // motion), since they are the most prone to artefacts, and we can set our anchor in the wrong place
     const std::size_t margin = std::max<std::size_t>(
         3U, static_cast<std::size_t>(0.05f * sampleCount));
     if(2U * margin >= sampleCount)
     {
         return Failure(ProcessingStatus::NotEnoughSamples, sampleCount);
     }
+
+    // Obtain the turnaround iterator and then index, by getting the min
+    // element from [margin, N-margin], where N is the count of samples
     const auto turnaroundIt
         = std::min_element(preliminaryPosition.begin() + margin,
                            preliminaryPosition.begin() + (sampleCount - margin));
+
     const std::size_t turnaroundIndex
         = static_cast<std::size_t>(turnaroundIt - preliminaryPosition.begin());
 
     std::vector<Vec3> velocity(sampleCount);
+    // Integrate again over acceleration, but with turnaround index, to obtain velocity on x,y,z
     for(std::size_t axis = 0; axis < 3U; ++axis)
     {
+        // For Z axis, we put our anchor turnaroundIndex, for x,y our anchors
+        // will be places only at the beginning and the end
+        // We put v(ta)
         IntegrateWithZeroVelocityAnchors(acceleration, time, axis,
                                          axis == 2U ? turnaroundIndex : 0U,
                                          scratch);
@@ -505,6 +602,7 @@ MotionProcessor::Process(const std::vector<data::SamplePacket> &rSamples,
         }
     }
 
+    // Calculate displacement (relative position, not absolute)
     std::vector<Vec3> position(sampleCount);
     for(std::size_t i = 1; i < sampleCount; ++i)
     {
@@ -519,6 +617,8 @@ MotionProcessor::Process(const std::vector<data::SamplePacket> &rSamples,
 
     float meanHorizontalX = 0.0f;
     float meanHorizontalY = 0.0f;
+    // Calculate average displacement on X and Y to determine covariance and
+    // which axis should be main plane, the device moved across - we will use PCA for that
     for(const Vec3 &rPoint : position)
     {
         meanHorizontalX += rPoint.x - position.front().x;
@@ -530,10 +630,17 @@ MotionProcessor::Process(const std::vector<data::SamplePacket> &rSamples,
     float covarianceXX = 0.0f;
     float covarianceXY = 0.0f;
     float covarianceYY = 0.0f;
+    // Calculate covariance xi - x0 - x^
+    // mean is already calculated, so we can just subtract it to obtain
+    // For the use of PCA, we need to calculate covariance matrix to determine
+    // along which axis device moved the most We can not state, that device moved
+    // across XY in some type of way, it could be only across X, only across Y
     for(const Vec3 &rPoint : position)
     {
         const float centeredX = rPoint.x - position.front().x - meanHorizontalX;
         const float centeredY = rPoint.y - position.front().y - meanHorizontalY;
+
+        // We do not need to divide by N for full covariance, since PCA needs just the general direction
         covarianceXX += centeredX * centeredX;
         covarianceXY += centeredX * centeredY;
         covarianceYY += centeredY * centeredY;
@@ -543,13 +650,34 @@ MotionProcessor::Process(const std::vector<data::SamplePacket> &rSamples,
     float principalY = 0.0f;
     if(covarianceXX + covarianceYY > std::numeric_limits<float>::epsilon())
     {
+        /* Since our matrix is 2x2 and symmetric:
+            | a, b |            | Cxx, Cxy |
+            | b, c |, we get    | Cxy, Cyy |
+
+            Thats why, we calculate our angle as tan(2theta) = 2b/a-c
+            So we get theta = 1/2 * atan2(2Cxy, Cxx - Cyy)
+
+            Later, since we know our vectors are unit vectors, we can get our
+                X axis defined as cos(theta) // principalX = cos(angle)
+                Y axis defined as sin(theta) // principalY = sin(angle
+            */
         const float angle
             = 0.5f
               * std::atan2(2.0f * covarianceXY, covarianceXX - covarianceYY);
+
         principalX = std::cos(angle);
         principalY = std::sin(angle);
     }
+    // Since we've got our axis for direction defined, where PC1 = (principalX,
+    // principalY), we can map our (x,y) coordinates onto that unit vector of general direction
+    /* We do that, by just multiplying every displacement from origin (xi -
+       x0), where xi is i-th Point, and x0 is the position of origin, and then
+       multiplying that by our u1 vector
+       So basic formula for that would look something like that
 
+       hi = (xi - x0) * cos(angle) + (yi - y0) * sin(angle)
+
+    */
     std::vector<float> horizontalPosition(sampleCount);
     for(std::size_t i = 0; i < sampleCount; ++i)
     {

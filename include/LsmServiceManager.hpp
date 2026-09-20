@@ -2,6 +2,7 @@
 #include "DataTypes.hpp"
 #include <LSM6DSV16XSensor.h>
 
+/// @brief Default I2C address of the LSM6DSV16X sensor.
 #define IMU_I2C_ADDRESS LSM6DSV16X_I2C_ADD_L
 
 namespace w8band::Hardware
@@ -25,11 +26,11 @@ public:
     /// @param[out] rPacketOut Struct passed by reference for storing loaded
     /// data. For more infromation about struct @see SamplePacket in
     /// DataTypes.hpp
-    /// @return True if obtained data consists of q, a, gv and a sensor
-    /// timestamp. False if a complete frame is not available yet.
+    /// @return True when a complete frame was returned. False when a frame is
+    /// not available yet or a sensor read failed.
     bool ObtainData(data::SamplePacket &rPacketOut);
 
-    /// @brief Method used to fill provided buffer data for calibration.
+    /// @brief Reserved hook for filling calibration data. Currently does nothing.
     void FillBufferData();
 
     /// @brief Method used for reseting FIFO by setting it into BYPASS mode,
@@ -77,4 +78,4 @@ private:
     bool m_HaveFreshTimestamp = false;
 };
 
-} // namespace w8band::lsm_service_manager
+} // namespace w8band::Hardware

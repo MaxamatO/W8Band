@@ -6,13 +6,13 @@
 #include <memory>
 #include <vector>
 
-/// @brief Value for number of samples to constantly buffer, in order to
-/// calibrate for gravity.
+/// @brief Number of samples retained from the time before recording starts.
 #define PRE_RECORD_SAMPLES 60
 
 namespace w8band
 {
 
+/// @brief Data shared between the application states during one measurement.
 struct DataContext
 {
 public:
@@ -22,20 +22,25 @@ public:
     DataContext(Hardware::BleServiceManager &m_rBle,
                 Hardware::LsmServiceManager &m_rLsm);
 
+    /// @brief Resets fields used by the current measurement.
+    void Reset();
+
     /// @brief Reference to BleServiceManager for handling BLE communication
     Hardware::BleServiceManager &m_rBleServiceManager;
 
     /// @brief Reference to LsmServiceManager for handling LSM6DSV16X
     Hardware::LsmServiceManager &m_rLsmServiceManager;
 
-    /// @brief Buffer used for calibration - calculating gravity from stored data
+    /// @brief Rolling buffer containing samples recorded before the repetition.
     data::SamplePacket m_PreBuffer[PRE_RECORD_SAMPLES];
 
-    /// @brief Helpers for inserting m_PreBuffer values into m_Data
+    /// @brief Index at which the next pre-record sample is written.
     uint16_t m_PreIndex = 0;
+
+    /// @brief Number of valid samples currently stored in the pre-record buffer.
     uint16_t m_PreCount = 0;
 
-    /// @brief Vector of result data
+    /// @brief Raw synchronized samples used for motion processing.
     std::vector<data::SamplePacket> m_Data;
 
     /// @brief Set by ISR in order to determine lift off
@@ -61,6 +66,9 @@ public:
     /// @brief Most recently calculated trajectory and repetition metrics.
     Motion::ProcessingResult m_ProcessingResult{};
 
+    /// @brief True if results are ready to be sent, false otherwise
+    bool m_ResultReady = false;
+
     /// @brief Helper method to populate rolling buffer to have continous data.
     /// @param[in] rPacket Reference to packet to push to buffer
     void PushToPreBuffer(data::SamplePacket &rPacket);
@@ -84,4 +92,4 @@ public:
     // void CalculateVelocityRealTime(data::SamplePacket &rPacket, )
 };
 
-} // namespace w8band::DataContext
+} // namespace w8band

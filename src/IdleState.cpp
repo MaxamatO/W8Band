@@ -6,11 +6,13 @@ IdleState::IdleState(DataContext &rDataCtx, W8BandFsm &rFsm)
     : fsm::IState<DataContext, StateId>(rDataCtx), m_rFsm(rFsm)
 {}
 
-void IdleState::OnEnter() {}
+void IdleState::OnEnter() { m_rContext.Reset(); }
 void IdleState::OnExit() {}
 
 void IdleState::Update()
-{ m_rFsm.RequestTransition(StateId::CalibrationState); }
+{
+    // m_rFsm.RequestTransition(StateId::CalibrationState);
+}
 
 StateId IdleState::GetStateId() const { return StateId::IdleState; }
 

@@ -6,6 +6,7 @@
 #include "helpers/SlidingWindow.hpp"
 #include <string>
 
+/// @brief Number of samples used to detect stillness and motion start.
 #define MOTION_START_WINDOW_SIZE 24
 
 namespace w8band::StateMachine
@@ -17,14 +18,18 @@ namespace w8band::StateMachine
 /// StillnessDetector to know that user has began their rep.
 enum class BufferringPhase
 {
+    /// @brief Waits for the IMU lift-off interrupt.
     WaitLiftOff,
+
+    /// @brief Waits until the barbell becomes still after lift-off.
     WaitStillness,
+
+    /// @brief Waits for movement that starts the repetition.
     WaitMotion
 };
 
-/// @brief BufferringState entered after a successful calibration. Resests m_WakeupDetected
-/// flag, keeps populating rolling buffer for PRE_ROCORD_SAMPLES amount. Waits
-/// for another m_WakeupDetected flag set for transition to RecordingState.
+/// @brief Waits for lift-off, a short still period and the start of movement.
+/// Keeps a rolling pre-record buffer and then enters RecordingState.
 class BufferringState : public fsm::IState<DataContext, StateId>
 {
 public:
@@ -69,7 +74,7 @@ private:
     /// @brief Reference to State Machine for state transition
     W8BandFsm &m_rFsm;
 
-    /// @brief Reference to current bufferring phase
+    /// @brief Current buffering phase.
     BufferringPhase m_Phase;
 
     /// @brief True if device has went under stillness threshold.
@@ -84,4 +89,4 @@ private:
     /// @brief Sensor timestamp at which motion dwell began.
     uint32_t m_MotionStartedTicks = 0;
 };
-}
+} // namespace w8band::StateMachine

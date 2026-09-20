@@ -7,6 +7,7 @@
 #include "helpers/ProcessingHelpers.hpp"
 #include <string>
 
+/// @brief Number of samples used by the online end-of-motion detector.
 #define END_MOTION_WINDOW_SIZE 24
 
 namespace w8band::StateMachine

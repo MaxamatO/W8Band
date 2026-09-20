@@ -2,11 +2,13 @@
 #include <math.h>
 namespace helpers::Processing
 {
-constexpr float LPF_B0 = 0.0494899563f;
-constexpr float LPF_B1 = 0.0989799125f;
-constexpr float LPF_B2 = 0.0494899563f;
-constexpr float LPF_A1 = -1.2796324250f;
-constexpr float LPF_A2 = 0.4775922501f;
+// Coefficients calculated offline to not calculate it each time.
+// These were calculated using bilinear pre warping
+constexpr float LPF_B0 = 0.0494899563f; // K^2 * norm
+constexpr float LPF_B1 = 2 * LPF_B0;
+constexpr float LPF_B2 = LPF_B0;
+constexpr float LPF_A1 = -1.2796324250f; // 2(K^2 - 1) * norm
+constexpr float LPF_A2 = 0.4775922501f;  // (1-sqrt(2)*K + K^2) * norm
 
 void LowPassFilter::Reset()
 {
@@ -17,16 +19,21 @@ void LowPassFilter::Reset()
     m_Y2 = 0.0f;
 }
 
+// Low pass filter with coeficcients b0, b1, b2, a1, a2
+// filtered is basically:
+// y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]
+// So result is dependant on both 2 previous results, and both 2
+// previous samples + current sample x[n]
 float LowPassFilter::Process(float value)
 {
     if(!m_Initialized)
     {
         m_Initialized = true;
-        m_X1 = value;
-        m_X2 = value;
-        m_Y1 = value;
-        m_Y2 = value;
-        return value;
+        m_X1 = value; // x[n-1]
+        m_X2 = value; // x[n-2]
+        m_Y1 = value; // y[n-1]
+        m_Y2 = value; // y[n-2]
+        return value; // x[n]
     }
 
     const float filtered = LPF_B0 * value + LPF_B1 * m_X1 + LPF_B2 * m_X2

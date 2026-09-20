@@ -6,27 +6,33 @@
 #include "helpers/SlidingWindow.hpp"
 #include <string>
 
-/// Window size 120 with 120Hz means 1s of device's stillness
+/// @brief A 60-sample window covers about 0.5 s at a 120 Hz sample rate.
 #define WINDOW_SIZE 60
 
-/// 360 Samples with 120Hz means 3s of calibrating time maximum.
+/// @brief Number of stationary samples used to calculate sensor bias.
 #define CALIBRATION_DATA_COUNT 360
 
 namespace w8band::StateMachine
 {
+/// @brief Steps performed during sensor calibration.
 enum class CalibrationPhase
 {
+    /// @brief Waits until the device is held still.
     WaitingForStillness,
+
+    /// @brief Collects stationary sensor samples.
     Accumulating,
+
+    /// @brief Calibration data is ready to be stored.
     Done,
+
+    /// @brief Calibration did not finish before its timeout.
     Failed
 };
 
 /// @brief Calibration state - Entered from IdleState on Calibrate command.
-/// Device is supposed to lay steadily on barbell on rack. Takes around 1
-/// second to calibrate. During that state data is taken from IMU and constant
-/// bias is calculated. If device can't obtain decent calibration, ERROR is
-/// sent to the user in orther to calibrate again.
+/// Device is supposed to lie still on a barbell placed on the rack. Stationary
+/// IMU samples are collected for a few seconds to calculate a constant bias.
 class CalibrationState : public fsm::IState<DataContext, StateId>
 {
 public:
