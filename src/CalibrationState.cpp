@@ -1,7 +1,7 @@
 #include "CalibrationState.hpp"
 
 #define SAMPLES_TO_DISCARD 30
-#define CALIBRATION_TIMEOUT_MS 6000
+#define CALIBRATION_TIMEOUT_MS 8000
 
 namespace w8band::StateMachine
 {
@@ -95,6 +95,8 @@ void CalibrationState::StillnessWaitHandler(data::SamplePacket &rPacket)
 {
     const float accelMag = DataContext::CalculateAccelMagnitude(rPacket);
     m_Window.Push(accelMag);
+    Serial.print("magnitude:");
+    Serial.println(accelMag);
     if(!m_Window.IsStill(STILLNESS_ACCEL_VAR_THS))
     {
         return;

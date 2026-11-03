@@ -104,3 +104,8 @@ PROBLEMY:
 - Wybor IIR filter  - high performance with lower orders
     Downside: can be unstable, move graph out of phase
 - Kalmann fitler? - best fit but we do not have any other way to measure absolute position to apply that filter
+
+### Variance numerical algorithm
+
+Welford's variance algorithm was chosen based on its numerical stability
+source: <https://jonisalonen.com/2013/deriving-welfords-method-for-computing-variance/> - implementation and arguments regarding stability

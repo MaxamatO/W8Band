@@ -155,8 +155,8 @@ private:
         0       - protocol version
         1       - messageType = Trajectory
         2:3     - resultId
-        4       - startIndex
-        5...    - chunks containing 4B of data (2B horizontalMm, 2B verticalMm)
+        4       - resultOffset
+        5    - chunks containing 4B of data (2B horizontalMm, 2B verticalMm)
     */
     /// @return True if notifies correctly, false otherwise
     bool SendResultTrajectory();

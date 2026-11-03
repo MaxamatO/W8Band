@@ -24,6 +24,9 @@ enum class StateId
     ProcessingState,
 
     /// @brief Reserved state for result transmission.
-    SendingState
+    SendingState,
+
+    /// @brief Device waits for reboot or "Reset" command from user.
+    ErrorState
 };
 } // namespace w8band::StateMachine

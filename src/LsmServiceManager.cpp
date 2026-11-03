@@ -79,25 +79,31 @@ bool LsmServiceManager::InitLsm()
     Serial.flush();
     delay(10);
 
+    // Call InitWakeup before FIFO setup, since Enable_Wake_up_Detection
+    // modifies refresh rates... why stm... why, you loveable engineers hid
+    // that from me destroying my recordings...
+    InitWakeup(status);
+
     status |= m_Imu.FIFO_Set_Mode(LSM6DSV16X_BYPASS_MODE);
     delay(20);
     status |= m_Imu.Set_SFLP_Batch(true, true, false);
     status |= m_Imu.FIFO_Enable_Timestamp();
-    status |= m_Imu.FIFO_Set_Timestamp_Decimation(
-        LSM6DSV16X_TMSTMP_DEC_1);
+    status |= m_Imu.FIFO_Set_Timestamp_Decimation(LSM6DSV16X_TMSTMP_DEC_1);
     Serial.println("after gvec 2");
     delay(10);
     status |= m_Imu.FIFO_Set_X_BDR(IMU_FREQ);
     status |= m_Imu.FIFO_Set_Mode(LSM6DSV16X_STREAM_MODE);
     delay(20);
 
-    InitWakeup(status);
     return (status == LSM6DSV16X_OK);
 }
 
 bool LsmServiceManager::InitWakeup(uint8_t &rStatus)
 {
     rStatus |= m_Imu.Enable_Wake_Up_Detection(LSM6DSV16X_INT1_PIN);
+
+    // Need to enable it again, since Enable_Wake_Up_Detection modifies it.
+    rStatus |= m_Imu.Set_X_ODR(IMU_FREQ);
 
     // Enables High pass filter mode, so we can transition smoothly, instead of needing a jitter.
     rStatus |= m_Imu.Set_X_Filter_Mode(1, 4);
@@ -191,8 +197,7 @@ bool LsmServiceManager::ObtainData(data::SamplePacket &rPacketOut)
             m_HaveFreshGV = true;
         } else if(m_Tag == TAG_TIMESTAMP)
         {
-            if(m_Imu.FIFO_Get_Timestamp(&m_LatestTimestampTicks)
-               != LSM6DSV16X_OK)
+            if(m_Imu.FIFO_Get_Timestamp(&m_LatestTimestampTicks) != LSM6DSV16X_OK)
             {
                 Serial.println("Error in FIFO GET TIMESTAMP");
                 return false;

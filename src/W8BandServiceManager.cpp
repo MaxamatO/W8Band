@@ -25,9 +25,9 @@ Hardware::BleTypes::BleDeviceStatus ToBleStatus(StateMachine::StateId state)
         return Hardware::BleTypes::BleDeviceStatus::Processing;
     case StateMachine::StateId::SendingState:
         return Hardware::BleTypes::BleDeviceStatus::ResultReady;
+    case StateMachine::StateId::ErrorState:
+    default: return Hardware::BleTypes::BleDeviceStatus::Error;
     }
-
-    return Hardware::BleTypes::BleDeviceStatus::Error;
 }
 } // namespace
 
@@ -62,6 +62,10 @@ void W8BandServiceManager::Init()
     m_Fsm.AddState(
         StateMachine::StateId::ProcessingState,
         std::make_unique<StateMachine::ProcessingState>(m_rDataContext, m_Fsm));
+
+    m_Fsm.AddState(
+        StateMachine::StateId::ErrorState,
+        std::make_unique<StateMachine::ErrorState>(m_rDataContext, m_Fsm));
     m_Fsm.Start(StateMachine::StateId::IdleState);
     m_LastPublishedState = StateMachine::StateId::IdleState;
     m_rBleServiceManager.SetStatus(Hardware::BleTypes::BleDeviceStatus::Idle);
@@ -74,6 +78,19 @@ void W8BandServiceManager::HandleBleCommand(
 {
     switch(rCommand.command)
     {
+    case Hardware::BleTypes::BleCommandType::Reset:
+        if(m_Fsm.GetCurrentStateId() == StateMachine::StateId::ErrorState)
+        {
+            m_Fsm.RequestTransition(StateMachine::StateId::IdleState);
+            m_rBleServiceManager.SendCommandResponse(
+                rCommand.command, Hardware::BleTypes::CommandResult::Ok);
+        } else
+        {
+            m_rBleServiceManager.SendCommandResponse(
+                rCommand.command,
+                Hardware::BleTypes::CommandResult::InvalidState);
+        }
+        break;
     case Hardware::BleTypes::BleCommandType::Calibrate:
         if(m_Fsm.GetCurrentStateId() == StateMachine::StateId::IdleState)
         {

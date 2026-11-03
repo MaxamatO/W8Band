@@ -3,6 +3,7 @@
 #include "BufferringState.hpp"
 #include "CalibrationState.hpp"
 #include "DataContext.hpp"
+#include "ErrorState.hpp"
 #include "IdleState.hpp"
 #include "LsmServiceManager.hpp"
 #include "ProcessingState.hpp"

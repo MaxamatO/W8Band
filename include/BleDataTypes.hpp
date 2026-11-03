@@ -11,7 +11,10 @@ enum class BleCommandType : uint8_t
     None = 0x00,
 
     /// @brief Starts a new device calibration.
-    Calibrate = 0x01
+    Calibrate = 0x01,
+
+    /// @brief Forces device to go from ErrorState to IdleState.
+    Reset = 0x03,
 };
 
 /// @brief Result returned after handling a Control Point command.

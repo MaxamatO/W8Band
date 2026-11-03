@@ -194,9 +194,14 @@ bool BleServiceManager::SetStatus(BleTypes::BleDeviceStatus status)
 
     if(Bluefruit.connected() && m_StatusCharacteristic.notifyEnabled())
     {
-        if(!m_StatusCharacteristic.notify8(value))
+        const bool notifyStatus = m_StatusCharacteristic.notify8(value);
+        if(!notifyStatus)
         {
             Serial.println("BLE: status notification failed");
+        } else
+        {
+            Serial.println("BLE: notification sent: ");
+            Serial.print(value);
         }
     }
 

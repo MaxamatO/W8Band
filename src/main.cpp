@@ -68,16 +68,16 @@ void setup()
     Checkpoint(1);
 
     Serial.begin(115200);
-    while(!Serial)
-        ;
+    // while(!Serial)
+    // ;
     // CHECKPOINT 2: po Serial.begin()
     // Checkpoint(2);
 
     uint32_t t = millis();
-    while(!Serial && (millis() - t < 2000))
-    {
-        delay(10);
-    }
+    // while(!Serial && (millis() - t < 2000))
+    // {
+    //     delay(10);
+    // }
     // CHECKPOINT 3: po petli czekania na Serial
     // Checkpoint(3);
 
