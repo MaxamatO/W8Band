@@ -104,6 +104,20 @@ void W8BandServiceManager::HandleBleCommand(
                 Hardware::BleTypes::CommandResult::InvalidState);
         }
         break;
+    case Hardware::BleTypes::BleCommandType::SetConfig:
+        if(m_Fsm.GetCurrentStateId() == StateMachine::StateId::IdleState)
+        {
+            m_rDataContext.m_ProcessingConfig.barbellMassKg
+                = rCommand.weightConfig.barbellWeight;
+            m_rBleServiceManager.SendCommandResponse(
+                rCommand.command, Hardware::BleTypes::CommandResult::Ok);
+        } else
+        {
+            m_rBleServiceManager.SendCommandResponse(
+                rCommand.command,
+                Hardware::BleTypes::CommandResult::InvalidState);
+        }
+        break;
     default:
         m_rBleServiceManager.SendCommandResponse(
             rCommand.command, Hardware::BleTypes::CommandResult::InvalidCommand);

@@ -13,6 +13,9 @@ enum class BleCommandType : uint8_t
     /// @brief Starts a new device calibration.
     Calibrate = 0x01,
 
+    /// @brief Indicates that data contains fitting WeightConfiguration structure
+    SetConfig = 0x02,
+
     /// @brief Forces device to go from ErrorState to IdleState.
     Reset = 0x03,
 };
@@ -64,11 +67,16 @@ enum class BleDeviceStatus : uint8_t
     Error = 0xFF
 };
 
+/// @brief Simple config sent by user with barbell weight for power calculations.
+struct BleWeightConfig
+{ uint16_t barbellWeight = 0; };
+
 /// @brief Command received from the Control Point characteristic.
 struct BleCommand
 {
     /// @brief Decoded command value.
     BleCommandType command = BleCommandType::None;
+    BleWeightConfig weightConfig = {};
 };
 
 /// @brief Two-byte response sent through the Control Point characteristic.
@@ -78,7 +86,7 @@ struct CommandResponse
     uint8_t command;
 
     /// @brief Command handling result stored as a CommandResult value.
-    uint8_t result;
+    CommandResult result;
 };
 
 /// @brief Need to split transmition into these phases

@@ -148,10 +148,28 @@ bool BleServiceManager::InitBle()
 void BleServiceManager::HandleWrite(const uint8_t *pData, uint16_t length)
 {
     BleTypes::BleCommand command{};
-    if(length == 1)
+    BleTypes::BleWeightConfig weightConfig{};
+
+    if(length >= 1)
     {
         command.command = static_cast<BleTypes::BleCommandType>(pData[0]);
     }
+
+    if(command.command == BleTypes::BleCommandType::SetConfig)
+    {
+        if(length != 3)
+        {
+            Serial.println("BLE: Invalid SetConfig length");
+            return;
+        }
+
+        // Data should be sent in centi Kg - 1kg - 100centiKg, not kilograms, so we need to divide it by 100
+        weightConfig.barbellWeight = (static_cast<uint16_t>(pData[1])
+                                      | (static_cast<uint16_t>(pData[2]) << 8))
+                                     / 100.0f;
+    }
+
+    command.weightConfig = weightConfig;
 
     const uint8_t writeIndex
         = m_CommandWriteIndex.load(std::memory_order_relaxed);
@@ -171,8 +189,9 @@ void BleServiceManager::HandleWrite(const uint8_t *pData, uint16_t length)
 bool BleServiceManager::SendCommandResponse(BleTypes::BleCommandType command,
                                             BleTypes::CommandResult result)
 {
-    const BleTypes::CommandResponse response{static_cast<uint8_t>(command),
-                                             static_cast<uint8_t>(result)};
+    const BleTypes::CommandResponse response{
+        static_cast<uint8_t>(command),
+        static_cast<BleTypes::CommandResult>(result)};
 
     if(!Bluefruit.connected() || !m_ControlCharacteristic.indicateEnabled())
     {
