@@ -111,7 +111,7 @@ void CalibrationState::CalibratingErrorHandler()
 {
     Serial.println("Entered error state");
     m_rContext.m_CalibrationValid = false;
-    m_rFsm.RequestTransition(StateId::IdleState);
+    m_rFsm.RequestTransition(StateId::ErrorState);
 }
 
 StateId CalibrationState::GetStateId() const

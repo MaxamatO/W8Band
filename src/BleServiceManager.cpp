@@ -170,6 +170,10 @@ void BleServiceManager::HandleWrite(const uint8_t *pData, uint16_t length)
     }
 
     command.weightConfig = weightConfig;
+    Serial.print("Commands recieved: ");
+    Serial.println(static_cast<uint8_t>(command.command));
+    Serial.print("Weight: ");
+    Serial.println(command.weightConfig.barbellWeight);
 
     const uint8_t writeIndex
         = m_CommandWriteIndex.load(std::memory_order_relaxed);
@@ -393,7 +397,7 @@ bool BleServiceManager::SendResultPower()
     uint8_t frame[8]{};
 
     frame[0] = PROTOCOL_VERSION;
-    frame[1] = static_cast<uint8_t>(BleTypes::ResultMessageType::Motion);
+    frame[1] = static_cast<uint8_t>(BleTypes::ResultMessageType::Power);
     WriteUint16LittleEndian(&frame[2], m_PendingResultId);
     WriteUint16LittleEndian(&frame[4], m_PendingResultData.maxPowerMilliwatts);
     WriteUint16LittleEndian(&frame[6],
