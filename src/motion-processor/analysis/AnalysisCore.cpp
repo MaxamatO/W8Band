@@ -17,9 +17,10 @@ constexpr float QUATERNION_MIN_NORM = 0.5f;
 constexpr float MOTION_START_VELOCITY_MPS = -0.05f;
 } // namespace
 
-ProcessingStatus ValidateAndBuildTimeline(
-    const std::vector<data::SamplePacket> &rSamples, float lowPassCutoffHz,
-    std::vector<float> &rTime, float &rSampleRateHz)
+ProcessingStatus
+ValidateAndBuildTimeline(const std::vector<data::SamplePacket> &rSamples,
+                         float lowPassCutoffHz, std::vector<float> &rTime,
+                         float &rSampleRateHz)
 {
     if(rSamples.size() < MIN_SAMPLE_COUNT)
     {
@@ -57,9 +58,9 @@ ProcessingStatus ValidateAndBuildTimeline(
     {
         const uint32_t elapsedTicks
             = rSamples[i].timestamp_ticks - rSamples[i - 1U].timestamp_ticks;
-        rTime[i] = rTime[i - 1U]
-                   + static_cast<float>(elapsedTicks)
-                         * LSM_TIMESTAMP_TICK_SECONDS;
+        rTime[i]
+            = rTime[i - 1U]
+              + static_cast<float>(elapsedTicks) * LSM_TIMESTAMP_TICK_SECONDS;
     }
     return ProcessingStatus::Ok;
 }
@@ -82,8 +83,7 @@ bool DecodeAndRotateSamples(const std::vector<data::SamplePacket> &rSamples,
         const float rawQz = rPacket.q[3] / Q14_SCALE;
         const float quaternionNorm = std::sqrt(
             rawQw * rawQw + rawQx * rawQx + rawQy * rawQy + rawQz * rawQz);
-        if(!std::isfinite(quaternionNorm)
-           || quaternionNorm < QUATERNION_MIN_NORM)
+        if(!std::isfinite(quaternionNorm) || quaternionNorm < QUATERNION_MIN_NORM)
         {
             return false;
         }
@@ -130,9 +130,9 @@ bool BuildGravityAlignedBasis(const std::vector<Vec3> &rGravity,
     }
 
     const float projection = Dot(reference, rUp);
-    rHorizontalX = {reference.x - projection * rUp.x,
-                    reference.y - projection * rUp.y,
-                    reference.z - projection * rUp.z};
+    rHorizontalX
+        = {reference.x - projection * rUp.x, reference.y - projection * rUp.y,
+           reference.z - projection * rUp.z};
     if(!Normalize(rHorizontalX))
     {
         return false;
@@ -189,23 +189,20 @@ std::size_t FindTurnaroundIndex(const std::vector<Vec3> &rAcceleration,
     const auto turnaroundIt = std::min_element(
         preliminaryPosition.begin() + margin,
         preliminaryPosition.begin() + (rAcceleration.size() - margin));
-    return static_cast<std::size_t>(turnaroundIt
-                                    - preliminaryPosition.begin());
+    return static_cast<std::size_t>(turnaroundIt - preliminaryPosition.begin());
 }
 
 void IntegrateMotion(const std::vector<Vec3> &rAcceleration,
                      const std::vector<float> &rTime,
-                     std::size_t turnaroundIndex,
-                     std::vector<float> &rScratch,
-                     std::vector<Vec3> &rVelocity,
-                     std::vector<Vec3> &rPosition)
+                     std::size_t turnaroundIndex, std::vector<float> &rScratch,
+                     std::vector<Vec3> &rVelocity, std::vector<Vec3> &rPosition)
 {
     rVelocity.assign(rAcceleration.size(), Vec3{});
     for(std::size_t axis = 0; axis < 3U; ++axis)
     {
-        IntegrateWithZeroVelocityAnchors(
-            rAcceleration, rTime, axis,
-            axis == 2U ? turnaroundIndex : 0U, rScratch);
+        IntegrateWithZeroVelocityAnchors(rAcceleration, rTime, axis,
+                                         axis == 2U ? turnaroundIndex : 0U,
+                                         rScratch);
         for(std::size_t i = 0; i < rAcceleration.size(); ++i)
         {
             SetComponent(rVelocity[i], axis, rScratch[i]);
@@ -279,25 +276,27 @@ void CalculateHorizontalPosition(const std::vector<Vec3> &rPosition,
 
 namespace
 {
-void PopulateMotionMetrics(
-    ProcessingResult &rResult, const std::vector<Vec3> &rAcceleration,
-    const std::vector<Vec3> &rVelocity,
-    const std::vector<Vec3> &rPosition, const std::vector<float> &rTime,
-    std::size_t turnaroundIndex, float maxGravityStd, float barbellMassKg)
+void PopulateMotionMetrics(ProcessingResult &rResult,
+                           const std::vector<Vec3> &rAcceleration,
+                           const std::vector<Vec3> &rVelocity,
+                           const std::vector<Vec3> &rPosition,
+                           const std::vector<float> &rTime,
+                           std::size_t turnaroundIndex, float maxGravityStd,
+                           float barbellMassKg)
 {
-    const auto verticalMinimumMaximum = std::minmax_element(
-        rPosition.begin(), rPosition.end(),
-        [](const Vec3 &rLeft, const Vec3 &rRight) {
-            return rLeft.z < rRight.z;
-        });
+    const auto verticalMinimumMaximum
+        = std::minmax_element(rPosition.begin(), rPosition.end(),
+                              [](const Vec3 &rLeft, const Vec3 &rRight) {
+                                  return rLeft.z < rRight.z;
+                              });
     const float verticalRom
         = verticalMinimumMaximum.second->z - verticalMinimumMaximum.first->z;
 
-    const auto topIt = std::max_element(
-        rPosition.begin() + turnaroundIndex, rPosition.end(),
-        [](const Vec3 &rLeft, const Vec3 &rRight) {
-            return rLeft.z < rRight.z;
-        });
+    const auto topIt
+        = std::max_element(rPosition.begin() + turnaroundIndex, rPosition.end(),
+                           [](const Vec3 &rLeft, const Vec3 &rRight) {
+                               return rLeft.z < rRight.z;
+                           });
     const std::size_t concentricEndIndex
         = static_cast<std::size_t>(topIt - rPosition.begin());
 
@@ -329,16 +328,14 @@ void PopulateMotionMetrics(
 
     float maximumPower = 0.0f;
     float meanPower = 0.0f;
-    const bool powerValid = std::isfinite(barbellMassKg)
-                            && barbellMassKg > 0.0f
+    const bool powerValid = std::isfinite(barbellMassKg) && barbellMassKg >= 0.0f
                             && concentricEndIndex > turnaroundIndex;
     if(powerValid)
     {
         float work = 0.0f;
-        float previousPower = barbellMassKg
-                              * (GRAVITY_MS2
-                                 + rAcceleration[turnaroundIndex].z)
-                              * rVelocity[turnaroundIndex].z;
+        float previousPower
+            = barbellMassKg * (GRAVITY_MS2 + rAcceleration[turnaroundIndex].z)
+              * rVelocity[turnaroundIndex].z;
         maximumPower = std::max(0.0f, previousPower);
         for(std::size_t i = turnaroundIndex + 1U; i <= concentricEndIndex; ++i)
         {
@@ -346,8 +343,7 @@ void PopulateMotionMetrics(
                                 * (GRAVITY_MS2 + rAcceleration[i].z)
                                 * rVelocity[i].z;
             maximumPower = std::max(maximumPower, power);
-            work += 0.5f * (previousPower + power)
-                    * (rTime[i] - rTime[i - 1U]);
+            work += 0.5f * (previousPower + power) * (rTime[i] - rTime[i - 1U]);
             previousPower = power;
         }
         meanPower = work / concentricDuration;
@@ -358,8 +354,8 @@ void PopulateMotionMetrics(
         static_cast<std::size_t>(std::numeric_limits<uint16_t>::max())));
     rResult.turnaroundIndex = static_cast<uint16_t>(turnaroundIndex);
     rResult.durationMs = ToMilliseconds(rTime.back() - rTime.front());
-    rResult.eccentricDurationMs = ToMilliseconds(
-        rTime[turnaroundIndex] - rTime[movementStartIndex]);
+    rResult.eccentricDurationMs
+        = ToMilliseconds(rTime[turnaroundIndex] - rTime[movementStartIndex]);
     rResult.concentricDurationMs = ToMilliseconds(concentricDuration);
     rResult.verticalRomMm = ToInt16(verticalRom * 1000.0f);
     rResult.maxVelocityMmPerSec = ToInt16(maximumVelocity * 1000.0f);
@@ -374,20 +370,19 @@ void PopulateMotionMetrics(
     rResult.powerValid = powerValid;
 }
 
-void PopulateReducedTrajectory(
-    ProcessingResult &rResult, const std::vector<Vec3> &rPosition,
-    const std::vector<float> &rHorizontalPosition,
-    std::size_t turnaroundIndex, uint16_t requestedPointCount)
+void PopulateReducedTrajectory(ProcessingResult &rResult,
+                               const std::vector<Vec3> &rPosition,
+                               const std::vector<float> &rHorizontalPosition,
+                               std::size_t turnaroundIndex,
+                               uint16_t requestedPointCount)
 {
     const std::size_t requestedCount = std::max<std::size_t>(
-        3U, std::min<std::size_t>(requestedPointCount,
-                                  MAX_TRAJECTORY_POINTS));
-    const std::size_t outputCount
-        = std::min(rPosition.size(), requestedCount);
-    std::size_t turnaroundOutputIndex = static_cast<std::size_t>(std::lround(
-        static_cast<double>(turnaroundIndex)
-        * static_cast<double>(outputCount - 1U)
-        / static_cast<double>(rPosition.size() - 1U)));
+        3U, std::min<std::size_t>(requestedPointCount, MAX_TRAJECTORY_POINTS));
+    const std::size_t outputCount = std::min(rPosition.size(), requestedCount);
+    std::size_t turnaroundOutputIndex = static_cast<std::size_t>(
+        std::lround(static_cast<double>(turnaroundIndex)
+                    * static_cast<double>(outputCount - 1U)
+                    / static_cast<double>(rPosition.size() - 1U)));
     turnaroundOutputIndex = std::max<std::size_t>(
         1U, std::min(turnaroundOutputIndex, outputCount - 2U));
 
@@ -396,17 +391,16 @@ void PopulateReducedTrajectory(
         std::size_t sampleIndex;
         if(outputIndex <= turnaroundOutputIndex)
         {
-            sampleIndex = static_cast<std::size_t>(std::lround(
-                static_cast<double>(turnaroundIndex)
-                * static_cast<double>(outputIndex)
-                / static_cast<double>(turnaroundOutputIndex)));
+            sampleIndex = static_cast<std::size_t>(
+                std::lround(static_cast<double>(turnaroundIndex)
+                            * static_cast<double>(outputIndex)
+                            / static_cast<double>(turnaroundOutputIndex)));
         } else
         {
             sampleIndex
                 = turnaroundIndex
                   + static_cast<std::size_t>(std::lround(
-                      static_cast<double>(rPosition.size() - 1U
-                                          - turnaroundIndex)
+                      static_cast<double>(rPosition.size() - 1U - turnaroundIndex)
                       * static_cast<double>(outputIndex - turnaroundOutputIndex)
                       / static_cast<double>(outputCount - 1U
                                             - turnaroundOutputIndex)));
@@ -424,17 +418,14 @@ void PopulateReducedTrajectory(
 } // namespace
 
 ProcessingResult BuildProcessingResult(
-    const std::vector<Vec3> &rAcceleration,
-    const std::vector<Vec3> &rVelocity,
+    const std::vector<Vec3> &rAcceleration, const std::vector<Vec3> &rVelocity,
     const std::vector<Vec3> &rPosition, const std::vector<float> &rTime,
-    const std::vector<float> &rHorizontalPosition,
-    std::size_t turnaroundIndex, float maxGravityStd,
-    const ProcessingConfig &rConfig)
+    const std::vector<float> &rHorizontalPosition, std::size_t turnaroundIndex,
+    float maxGravityStd, const ProcessingConfig &rConfig)
 {
     ProcessingResult result{};
     PopulateMotionMetrics(result, rAcceleration, rVelocity, rPosition, rTime,
-                          turnaroundIndex, maxGravityStd,
-                          rConfig.barbellMassKg);
+                          turnaroundIndex, maxGravityStd, rConfig.barbellMassKg);
     PopulateReducedTrajectory(result, rPosition, rHorizontalPosition,
                               turnaroundIndex, rConfig.trajectoryPointCount);
     result.status = ProcessingStatus::Ok;

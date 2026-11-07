@@ -13,6 +13,7 @@ void DataContext::Reset()
     m_PreIndex = 0;
     m_PreCount = 0;
     m_Data.clear();
+    m_ProcessingConfig = {};
     m_LiftOffDetected = false;
     m_MotionStartDetected = false;
     m_RecordingStartedMs = false;
