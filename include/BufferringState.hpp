@@ -56,6 +56,10 @@ public:
     /// @return Bufferring state name.
     std::string GetStateName() const override;
 
+    /// @brief Returns current bufferring phase, to send it to user.
+    /// @return BufferringPhase::Phase
+    BufferringPhase GetBufferringPhaseId() const;
+
 private:
     /// @brief Helper method for handling WaitLiftOff phase.
     void HandleWaitLiftOff();

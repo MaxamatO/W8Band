@@ -67,7 +67,6 @@ void W8BandServiceManager::Init()
         StateMachine::StateId::ErrorState,
         std::make_unique<StateMachine::ErrorState>(m_rDataContext, m_Fsm));
     m_Fsm.Start(StateMachine::StateId::IdleState);
-    m_LastPublishedState = StateMachine::StateId::IdleState;
     m_rBleServiceManager.SetStatus(Hardware::BleTypes::BleDeviceStatus::Idle);
 }
 
@@ -137,13 +136,41 @@ void W8BandServiceManager::HandleBleCommand(
 void W8BandServiceManager::PublishFsmStatus()
 {
     const StateMachine::StateId currentState = m_Fsm.GetCurrentStateId();
-    if(currentState == m_LastPublishedState)
+    Hardware::BleTypes::BleDeviceStatus status = ToBleStatus(currentState);
+
+    // jezeli jest bufferring state, to chcemy przeslac bufferring state i dana
+    // faza jezeli nie buifferring state to po prostu state
+    if(currentState == StateMachine::StateId::BufferringState)
+    {
+        const auto *bufferringState
+            = static_cast<const StateMachine::BufferringState *>(
+                m_Fsm.GetCurrentState());
+        const auto currentBufPhase = bufferringState->GetBufferringPhaseId();
+
+        switch(currentBufPhase)
+        {
+        case StateMachine::BufferringPhase::WaitLiftOff:
+            status = Hardware::BleTypes::BleDeviceStatus::Bufferring_WaitLiftOff;
+            break;
+        case StateMachine::BufferringPhase::WaitStillness:
+            status
+                = Hardware::BleTypes::BleDeviceStatus::Bufferring_WaitStillness;
+            break;
+        case StateMachine::BufferringPhase::WaitMotion:
+            status = Hardware::BleTypes::BleDeviceStatus::Bufferring_WaitMotion;
+            break;
+        default: break;
+        }
+    }
+    if(status == m_LastPublishedState)
     {
         return;
     }
 
-    m_LastPublishedState = currentState;
-    m_rBleServiceManager.SetStatus(ToBleStatus(currentState));
+    if(m_rBleServiceManager.SetStatus(status))
+    {
+        m_LastPublishedState = status;
+    }
 }
 
 void W8BandServiceManager::HandleBleSendResultData()

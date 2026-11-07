@@ -71,6 +71,8 @@ public:
         }
     }
 
+    const State *GetCurrentState() const { return m_pCurrentState; }
+
     /// @brief Returns current state's Id
     /// @return Current state's Id
     TStateId GetCurrentStateId() const

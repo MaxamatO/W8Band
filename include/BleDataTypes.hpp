@@ -51,6 +51,11 @@ enum class BleDeviceStatus : uint8_t
     /// @brief Device is waiting for the repetition to start.
     Buffering = 0x03,
 
+    /// @brief Bufferring states internal phases
+    Bufferring_WaitLiftOff = 0x13,
+    Bufferring_WaitStillness = 0x23,
+    Bufferring_WaitMotion = 0x33,
+
     /// @brief Device is recording one repetition.
     Recording = 0x04,
 

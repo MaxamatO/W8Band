@@ -16,8 +16,7 @@ bool HasSensorTimeElapsed(uint32_t startedTicks, uint32_t nowTicks,
                           uint32_t durationMs)
 {
     const uint32_t elapsedTicks = nowTicks - startedTicks;
-    const float elapsedMs
-        = elapsedTicks * LSM_TIMESTAMP_TICK_SECONDS * 1000.0f;
+    const float elapsedMs = elapsedTicks * LSM_TIMESTAMP_TICK_SECONDS * 1000.0f;
     return elapsedMs >= static_cast<float>(durationMs);
 }
 }
@@ -81,8 +80,7 @@ void BufferringState::HandleWaitStillness(data::SamplePacket &rPacket)
 {
     const float accelMag = DataContext::CalculateAccelMagnitude(rPacket);
     m_Window.Push(accelMag);
-    bool stillnessDetected
-        = m_Window.IsStill(HOLD_STILL_ACCEL_VAR_THS);
+    bool stillnessDetected = m_Window.IsStill(HOLD_STILL_ACCEL_VAR_THS);
 
     // Wykrycie ciszy -> dwell start. Nastepna iteracja -> Dalej cisza -> dwell
     // start -> update time Nastepna iteracja -> RUCH -> dwell = false -> Nie
@@ -115,8 +113,7 @@ void BufferringState::HandleWaitMotion(data::SamplePacket &rPacket)
     const float accelMag = DataContext::CalculateAccelMagnitude(rPacket);
     m_Window.Push(accelMag);
 
-    bool stillnessDetected
-        = m_Window.IsStill(MOTION_START_ACCEL_VAR_THS);
+    bool stillnessDetected = m_Window.IsStill(MOTION_START_ACCEL_VAR_THS);
 
     if(stillnessDetected)
     {
@@ -138,6 +135,9 @@ void BufferringState::HandleWaitMotion(data::SamplePacket &rPacket)
         m_rFsm.RequestTransition(StateId::RecordingState);
     }
 }
+
+BufferringPhase BufferringState::GetBufferringPhaseId() const
+{ return m_Phase; }
 
 StateId BufferringState::GetStateId() const
 { return StateId::BufferringState; }

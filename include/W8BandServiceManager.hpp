@@ -79,8 +79,8 @@ private:
     StateMachine::W8BandFsm m_Fsm;
 
     /// @brief Last FSM state published through the Status characteristic.
-    StateMachine::StateId m_LastPublishedState
-        = StateMachine::StateId::IdleState;
+    Hardware::BleTypes::BleDeviceStatus m_LastPublishedState
+        = Hardware::BleTypes::BleDeviceStatus::Initializing;
 };
 
 } // namespace w8band
