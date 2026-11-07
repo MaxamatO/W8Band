@@ -144,8 +144,8 @@ private:
         0       - protocol version
         1       - messageType = Power
         2:3     - resultId (unique for each rep)
-        4:5     - maxPowerMilliwatts
-        6:7     - meanConventricPowerMilliwats
+        4:7     - maxPowerMilliwatts
+        8:11     - meanConventricPowerMilliwats
     */
     /// @return True if notification was queued, false otherwise.
     bool SendResultPower();

@@ -107,8 +107,17 @@ void W8BandServiceManager::HandleBleCommand(
     case Hardware::BleTypes::BleCommandType::SetConfig:
         if(m_Fsm.GetCurrentStateId() == StateMachine::StateId::IdleState)
         {
+            // barbell weight is saved in uint16_t, and saved in centi kg, 1kg
+            // -- 100centikg, that means:
+            /*
+                user sets weight as 120.50kg
+                mobile multiplies is by 100, so 12050centiKg is sent
+                We recieve that in 2 bytes, so we need to cast it to float and
+               divide by 100.0f
+            */
             m_rDataContext.m_ProcessingConfig.barbellMassKg
-                = rCommand.weightConfig.barbellWeight;
+                = static_cast<float>(rCommand.weightConfig.barbellWeight)
+                  / 100.0f;
             m_rBleServiceManager.SendCommandResponse(
                 rCommand.command, Hardware::BleTypes::CommandResult::Ok);
         } else

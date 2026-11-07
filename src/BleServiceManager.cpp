@@ -165,8 +165,7 @@ void BleServiceManager::HandleWrite(const uint8_t *pData, uint16_t length)
 
         // Data should be sent in centi Kg - 1kg - 100centiKg, not kilograms, so we need to divide it by 100
         weightConfig.barbellWeight = (static_cast<uint16_t>(pData[1])
-                                      | (static_cast<uint16_t>(pData[2]) << 8))
-                                     / 100.0f;
+                                      | (static_cast<uint16_t>(pData[2]) << 8));
     }
 
     command.weightConfig = weightConfig;
@@ -394,13 +393,13 @@ bool BleServiceManager::SendResultMotionMetrics()
 
 bool BleServiceManager::SendResultPower()
 {
-    uint8_t frame[8]{};
+    uint8_t frame[12]{};
 
     frame[0] = PROTOCOL_VERSION;
     frame[1] = static_cast<uint8_t>(BleTypes::ResultMessageType::Power);
     WriteUint16LittleEndian(&frame[2], m_PendingResultId);
-    WriteUint16LittleEndian(&frame[4], m_PendingResultData.maxPowerMilliwatts);
-    WriteUint16LittleEndian(&frame[6],
+    WriteUint32LittleEndian(&frame[4], m_PendingResultData.maxPowerMilliwatts);
+    WriteUint32LittleEndian(&frame[8],
                             m_PendingResultData.meanConcentricPowerMilliwatts);
 
     return Bluefruit.connected() && m_DataCharacteristic.notifyEnabled()
